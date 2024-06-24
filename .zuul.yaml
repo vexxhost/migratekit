@@ -16,7 +16,7 @@
             Oc5Jat0Kphpt12aHkUhCq1PWb0b1LDQSe6yM+B+LMSaIoObOh5o4C92r3VFjLs=
 
 - job:
-    name: atmosphere-build-container-image-libvirt-tls-sidecar
+    name: migratekit-build-container-image
     parent: ci-build-container-image
     vars: &container_image_vars
       container_command: docker
@@ -57,6 +57,7 @@
       nodes: []
 
 - project:
+    merge-mode: squash
     check:
       jobs:
         - migratekit-build-container-image
