@@ -2,7 +2,7 @@
     name: registry-credentials
     data:
       registry.atmosphere.dev:
-        username: robot$zuul
+        username: robot$migratekit
         password: !encrypted/pkcs1-oaep
           - IJ5yVsrMS71RukqgwEZ0OkI6rwlybip5fshOLZJdWtTF2vK6nkd8vJoPLZJOFodsElcnA
             lTJDcUYr11FNfu4hjZpg2hnS7ZbTpkMOGg012FYnpPQY4FjzMQ67h61ZxiNvToEG+/JTj
