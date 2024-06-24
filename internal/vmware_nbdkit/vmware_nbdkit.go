@@ -21,6 +21,8 @@ import (
 	"libguestfs.org/libnbd"
 )
 
+const MaxChunkSize = 64 * 1024 * 1024
+
 type VddkConfig struct {
 	Endpoint   *url.URL
 	Thumbprint string
@@ -266,18 +268,26 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 		diskChangeInfo := res.Returnval
 
 		for _, area := range diskChangeInfo.ChangedArea {
-			buf := make([]byte, area.Length)
-			err = handle.Pread(buf, uint64(area.Start), nil)
-			if err != nil {
-				return err
-			}
+			for offset := area.Start; offset < area.Start+area.Length; {
+				chunkSize := area.Length - (offset - area.Start)
+				if chunkSize > MaxChunkSize {
+					chunkSize = MaxChunkSize
+				}
 
-			_, err = fd.WriteAt(buf, area.Start)
-			if err != nil {
-				return err
-			}
+				buf := make([]byte, chunkSize)
+				err = handle.Pread(buf, uint64(offset), nil)
+				if err != nil {
+					return err
+				}
 
-			bar.Set64(area.Start)
+				_, err = fd.WriteAt(buf, offset)
+				if err != nil {
+					return err
+				}
+
+				bar.Set64(offset + chunkSize)
+				offset += chunkSize
+			}
 		}
 
 		startOffset += diskChangeInfo.StartOffset + diskChangeInfo.Length
