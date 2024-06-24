@@ -57,7 +57,7 @@
       nodes: []
 
 - project:
-    merge-mode: squash
+    merge-mode: squash-merge
     check:
       jobs:
         - migratekit-build-container-image
