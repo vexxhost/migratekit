@@ -22,12 +22,14 @@ import (
 )
 
 var (
-	endpoint       string
-	username       string
-	password       string
-	path           string
-	flavorId       string
-	networkMapping cmd.NetworkMappingFlag
+	endpoint         string
+	username         string
+	password         string
+	path             string
+	flavorId         string
+	networkMapping   cmd.NetworkMappingFlag
+	availabilityZone string
+	volumeType       string
 )
 
 var rootCmd = &cobra.Command{
@@ -229,6 +231,9 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&path, "vmware-path", "", "VMware VM path (e.g. '/Datacenter/vm/VM')")
 	rootCmd.MarkPersistentFlagRequired("vmware-path")
+
+	rootCmd.PersistentFlags().StringVar(&availabilityZone, "availability-zone", "", "Openstack availability zone for blockdevice & server")
+	rootCmd.PersistentFlags().StringVar(&volumeType, "volume-type", "", "Openstack volume type")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")

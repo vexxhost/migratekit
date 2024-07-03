@@ -179,6 +179,7 @@ func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *ob
 
 	var blockDevices []servers.BlockDevice
 	disks := devices.SelectByType((*types.VirtualDisk)(nil))
+	diskIndex := 0
 	for _, disk := range disks {
 		vd := disk.(*types.VirtualDisk)
 		volume, err := c.GetVolumeForDisk(ctx, vm, vd)
@@ -187,10 +188,12 @@ func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *ob
 		}
 
 		blockDevices = append(blockDevices, servers.BlockDevice{
+			BootIndex:       diskIndex,
 			SourceType:      servers.SourceVolume,
 			UUID:            volume.ID,
 			DestinationType: servers.DestinationVolume,
 		})
+		diskIndex++
 	}
 
 	server, err := servers.Create(ctx, c.Compute, servers.CreateOpts{

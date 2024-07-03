@@ -68,6 +68,13 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 		volume, err = volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
 			Name: DiskLabel(t.VirtualMachine, t.Disk),
 			Size: int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
+			// FIXME: not only should this be optional, but it should be a variable but
+			// danny and michael are special and can't figure out how to pass variables
+			// to this function
+			// AvailabilityZone: "availabilityZone",
+			// VolumeType:       volumeType,
+			AvailabilityZone: "gb-lon-3",
+			VolumeType:       "st-retail-devtest-1000",
 			Metadata: map[string]string{
 				"migrate_kit": "true",
 				"vm":          t.VirtualMachine.Reference().Value,
@@ -109,6 +116,19 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
+			}
+			// FIXME: review this and see if we can be combined with a block above
+			log.WithFields(log.Fields{
+				"volume_id": volume.ID,
+			}).Info("Setting volume to be SCSI")
+			err = volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
+				Metadata: map[string]string{
+					"hw_disk_bus":   "scsi",
+					"hw_scsi_model": "virtio-scsi",
+				},
+			}).ExtractErr()
+			if err != nil {
+				return err
 			}
 		}
 	} else if err != nil {
