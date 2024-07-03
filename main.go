@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vexxhost/migratekit/cmd"
 	"github.com/vexxhost/migratekit/internal/openstack"
+	"github.com/vexxhost/migratekit/internal/target"
 	"github.com/vexxhost/migratekit/internal/vmware"
 	"github.com/vexxhost/migratekit/internal/vmware_nbdkit"
 	"github.com/vmware/govmomi"
@@ -96,6 +97,12 @@ var rootCmd = &cobra.Command{
 			Endpoint:   endpointUrl,
 			Thumbprint: thumbprint,
 		})
+
+		v := target.VolumeCreateOpts{
+			AvailabilityZone: availabilityZone,
+			VolumeType:       volumeType,
+		}
+		ctx = context.WithValue(ctx, "volumeCreateOpts", &v)
 
 		cmd.SetContext(ctx)
 

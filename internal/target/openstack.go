@@ -24,6 +24,11 @@ type OpenStack struct {
 	ClientSet      *openstack.ClientSet
 }
 
+type VolumeCreateOpts struct {
+	AvailabilityZone string
+	VolumeType       string
+}
+
 func NewOpenStack(ctx context.Context, vm *object.VirtualMachine, disk *types.VirtualDisk) (*OpenStack, error) {
 	clientSet, err := openstack.NewClientSet(ctx)
 	if err != nil {
@@ -65,16 +70,12 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		log.Info("Creating new volume")
+		opts := ctx.Value("volumeCreateOpts").(*VolumeCreateOpts)
 		volume, err = volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
-			Name: DiskLabel(t.VirtualMachine, t.Disk),
-			Size: int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
-			// FIXME: not only should this be optional, but it should be a variable but
-			// danny and michael are special and can't figure out how to pass variables
-			// to this function
-			// AvailabilityZone: "availabilityZone",
-			// VolumeType:       volumeType,
-			AvailabilityZone: "gb-lon-3",
-			VolumeType:       "st-retail-devtest-1000",
+			Name:             DiskLabel(t.VirtualMachine, t.Disk),
+			Size:             int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
+			AvailabilityZone: opts.AvailabilityZone,
+			VolumeType:       opts.VolumeType,
 			Metadata: map[string]string{
 				"migrate_kit": "true",
 				"vm":          t.VirtualMachine.Reference().Value,
