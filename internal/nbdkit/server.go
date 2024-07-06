@@ -1,11 +1,12 @@
 package nbdkit
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type NbdkitServer struct {
@@ -15,10 +16,10 @@ type NbdkitServer struct {
 }
 
 func (s *NbdkitServer) Start() error {
-	var stdoutBuf, stderrBuf bytes.Buffer
-	s.cmd.Stdout = &stdoutBuf
-	s.cmd.Stderr = &stderrBuf
+	s.cmd.Stdout = os.Stdout
+	s.cmd.Stderr = os.Stderr
 
+	log.Debug("Running command: ", s.cmd)
 	if err := s.cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start nbdkit server: %w", err)
 	}
@@ -30,8 +31,7 @@ func (s *NbdkitServer) Start() error {
 		select {
 		case <-pidFileTimeout:
 			s.cmd.Process.Kill()
-			errOutput := fmt.Sprintf("stdout: %s\nstderr: %s", stdoutBuf.String(), stderrBuf.String())
-			return fmt.Errorf("timeout waiting for pidfile to appear: %s\n%s", s.pidFile, errOutput)
+			return fmt.Errorf("timeout waiting for pidfile to appear: %s", s.pidFile)
 		case <-tick:
 			if _, err := os.Stat(s.pidFile); err == nil {
 				return nil
