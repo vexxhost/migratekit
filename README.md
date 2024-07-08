@@ -53,6 +53,24 @@ download the VDDK as well as accept the EULA.
    you will need to update the Docker volume mount in the next section to reflect
    the directory you extracted the tarball to.
 
+### Configuring account for Migratekit
+
+If you are using vCenter, you will need an account with at least the following permissions
+to be able to use Migratekit:
+
+| Privilege Name in the vSphere Client             | Purpose                                                            | Required On                   | Privilege Name in the API                          |
+|--------------------------------------------------|--------------------------------------------------------------------|-------------------------------|----------------------------------------------------|
+| Browse datastore                                 | Enable browsing of VM log files for troubleshooting snapshot issues. | Data stores                   | Datastore.Browse                                   |
+| Low level file operations                        | Permit read/write/delete/rename operations in the datastore browser for snapshot troubleshooting. | Data stores                   | Datastore.FileManagement                           |
+| Change Configuration - Toggle disk change tracking | Enable or disable change tracking of VM disks to manage data changes between snapshots. | Virtual machines               | VirtualMachine.Config.ChangeTracking               |
+| Change Configuration - Acquire disk lease        | Allow disk lease operations to read VM disks using the VMware vSphere Virtual Disk Development Kit (VDDK). | Virtual machines               | VirtualMachine.Config.DiskLease                    |
+| Provisioning - Allow read-only disk access       | Enable read-only access to VM disks for data reading using the VDDK. | Virtual machines               | VirtualMachine.Provisioning.DiskRandomRead         |
+| Provisioning - Allow disk access                 | Permit read access to VM disks for troubleshooting using the VDDK.  | Virtual machines               | VirtualMachine.Provisioning.DiskRandomAccess       |
+| Provisioning - Allow virtual machine download    | Enable downloading of VM-related files to facilitate troubleshooting. | Root host or vCenter Server    | VirtualMachine.Provisioning.GetVmFiles             |
+| Snapshot management                              | Facilitate Discovery, Software Inventory, and Dependency Mapping on VMs. | Virtual machines               | VirtualMachine.State.*                             |
+| Guest operations                                 | Allow creation and management of VM snapshots for replication.      | Virtual machines               | VirtualMachine.GuestOperations.*                   |
+| Interaction Power Off                            | Permit powering off the VM during migration to Migratekit.         | Virtual machines               | VirtualMachine.Interact.PowerOff                   |
+
 ### Running Migratekit
 
 Assuming that you already have Docker installed on your system, you can use the

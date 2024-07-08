@@ -38,6 +38,8 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 		"nbdcopy",
 		args...,
 	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	cmd.ExtraFiles = []*os.File{progressWrite}
 
 	logger.Debug("Running command: ", cmd)
