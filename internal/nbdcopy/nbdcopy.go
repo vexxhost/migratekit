@@ -2,7 +2,6 @@ package nbdcopy
 
 import (
 	"bufio"
-	"bytes"
 	"os"
 	"os/exec"
 	"strconv"
@@ -42,8 +41,6 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.ExtraFiles = []*os.File{progressWrite}
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
 
 	logger.Debug("Running command: ", cmd)
 	if err := cmd.Start(); err != nil {
@@ -70,7 +67,6 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 	}()
 
 	if err := cmd.Wait(); err != nil {
-		logger.Error("Error running nbdcopy: ", stderrBuf.String())
 		return err
 	}
 
