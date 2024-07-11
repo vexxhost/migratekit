@@ -162,6 +162,32 @@ contributors to add support for more complex VMware environments to Migratekit
 for the benefit of the community, but we need your help to do so because of
 a lack of access to these environments and their licensing costs.
 
+### Development
+
+In order to have a development environment for Migratekit, it's recommended to
+run your development inside of a Docker container.  You can use the following
+command to run a development environment for Migratekit:
+
+```bash
+docker run -it --rm --privileged \
+  -v /dev:/dev \
+  -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
+  -v $(pwd):/app \
+  --env-file <(env | grep OS_) \
+  registry.atmosphere.dev/library/migratekit:latest \
+  bash
+```
+
+Once you've launched this, it's recommended to add all of the development headers
+and other components, so you can run the following:
+
+```bash
+dnf install nbdkit nbdkit-vddk-plugin libnbd golang libnbd-devel virt-v2v
+```
+
+From there, you'll be good to go by switching to the `/app` directory and running
+any of the commands that you need to run for development.
+
 ## Support
 
 If you need help with using Migratekit, you can either open an issue to get
