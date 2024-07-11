@@ -173,9 +173,8 @@ docker run -it --rm --privileged \
   -v /dev:/dev \
   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   -v $(pwd):/app \
-  --env-file <(env | grep OS_) \
-  registry.atmosphere.dev/library/migratekit:latest \
-  bash
+  --entrypoint /bin/bash \
+  fedora:40
 ```
 
 Once you've launched this, it's recommended to add all of the development headers
