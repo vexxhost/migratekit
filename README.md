@@ -151,6 +151,18 @@ You should ideally match the network mapping to the network that the virtual mac
 is attached to on the VMware side to ensure that the virtual machine can communicate
 with the network once it has been migrated to the OpenStack cloud.
 
+There are a few optional flags to define the following:
+-  `--security-groups`: A comma separated list of security group UUIDs to apply
+                       to the virtual machines port, if not supplied only the
+                       'default' security group will be applied
+-  `--volume-type`: Openstack volume type to be used for the block devices
+-  `--availability-zone`: Opentack availabiity zone to be associated with both
+                        block device and virtual machine
+-  `--run-v2v`: A flag to disable the running of virt-v2v-in-place against the
+              destination machine.  Should be disabled with caution as it may
+              result in an unbootable instance. To disable flag must be passed
+              with an =false e.g. `--run-v2v=false`
+
 ## Contributing
 
 We welcome contributions to this project, we hope to see this project grow and
