@@ -33,6 +33,7 @@ var (
 	availabilityZone string
 	volumeType       string
 	securityGroups   string
+	enablev2v        bool
 )
 
 var rootCmd = &cobra.Command{
@@ -215,7 +216,7 @@ var cutoverCmd = &cobra.Command{
 		}
 
 		servers = vmware_nbdkit.NewNbdkitServers(vddkConfig, vm)
-		err = servers.MigrationCycle(ctx, true)
+		err = servers.MigrationCycle(ctx, enablev2v)
 		if err != nil {
 			return err
 		}
@@ -259,7 +260,7 @@ func init() {
 
 	cutoverCmd.Flags().StringVar(&securityGroups, "security-groups", "", "Openstack security groups, comma separated (e.g. '42c5a89e-4034-4f2a-adea-b33adc9614f4,6647122c-2d46-42f1-bb26-f38007730fdc')")
 
-	cutoverCmd.Flags().BoolVar(&enableV2V, "run-v2v", true, "Run virt2v-inplace on destination VM")
+	cutoverCmd.Flags().BoolVar(&enablev2v, "run-v2v", true, "Run virt2v-inplace on destination VM")
 
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(cutoverCmd)
