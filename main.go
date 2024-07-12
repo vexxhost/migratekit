@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/erikgeiser/promptkit/confirmation"
@@ -34,6 +35,7 @@ var (
 	volumeType       string
 	securityGroups   string
 	enablev2v        bool
+	busType          string
 )
 
 var rootCmd = &cobra.Command{
@@ -48,6 +50,12 @@ var rootCmd = &cobra.Command{
 		}
 
 		var err error
+
+		validBuses := []string{"scsi", "virtio"}
+		if !slices.Contains(validBuses, busType) {
+			log.Fatal("Invalid bus type: ", busType, ". Valid options are: ", validBuses)
+		}
+
 		thumbprint, err := vmware.GetEndpointThumbprint(endpointUrl)
 		if err != nil {
 			return err
@@ -104,6 +112,7 @@ var rootCmd = &cobra.Command{
 		v := target.VolumeCreateOpts{
 			AvailabilityZone: availabilityZone,
 			VolumeType:       volumeType,
+			BusType:          busType,
 		}
 		ctx = context.WithValue(ctx, "volumeCreateOpts", &v)
 
@@ -250,7 +259,10 @@ func init() {
 	rootCmd.MarkPersistentFlagRequired("vmware-path")
 
 	rootCmd.PersistentFlags().StringVar(&availabilityZone, "availability-zone", "", "Openstack availability zone for blockdevice & server")
+
 	rootCmd.PersistentFlags().StringVar(&volumeType, "volume-type", "", "Openstack volume type")
+
+	rootCmd.PersistentFlags().StringVar(&busType, "disk-bus-type", "virtio", "Specifies the type of disk controller to attach disk devices to.")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")

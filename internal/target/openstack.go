@@ -27,6 +27,7 @@ type OpenStack struct {
 type VolumeCreateOpts struct {
 	AvailabilityZone string
 	VolumeType       string
+	BusType          string
 }
 
 func NewOpenStack(ctx context.Context, vm *object.VirtualMachine, disk *types.VirtualDisk) (*OpenStack, error) {
@@ -68,19 +69,32 @@ func findDevice(volumeID string) (string, error) {
 
 func (t *OpenStack) Connect(ctx context.Context) error {
 	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volumeMetadata := map[string]string{
+		"migrate_kit": "true",
+		"vm":          t.VirtualMachine.Reference().Value,
+		"disk":        t.Disk.DiskObjectId,
+	}
+
+	opts := ctx.Value("volumeCreateOpts").(*VolumeCreateOpts)
+
+	if opts.BusType == "scsi" {
+		volumeMetadata["hw_disk_bus"] = "scsi"
+		volumeMetadata["hw_scsi_model"] = "virtio-scsi"
+	}
+
+	if types.GuestOsDescriptorFirmwareType(o.Config.Firmware) == types.GuestOsDescriptorFirmwareTypeEfi {
+		volumeMetadata["hw_machine_type"] = "q35"
+		volumeMetadata["hw_firmware_type"] = "uefi"
+	}
+
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		log.Info("Creating new volume")
-		opts := ctx.Value("volumeCreateOpts").(*VolumeCreateOpts)
 		volume, err = volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
 			Name:             DiskLabel(t.VirtualMachine, t.Disk),
 			Size:             int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
 			AvailabilityZone: opts.AvailabilityZone,
 			VolumeType:       opts.VolumeType,
-			Metadata: map[string]string{
-				"migrate_kit": "true",
-				"vm":          t.VirtualMachine.Reference().Value,
-				"disk":        t.Disk.DiskObjectId,
-			},
+			Metadata:         volumeMetadata,
 		}, nil).Extract()
 		if err != nil {
 			return err
@@ -104,33 +118,6 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 				return err
 			}
 
-			if types.GuestOsDescriptorFirmwareType(o.Config.Firmware) == types.GuestOsDescriptorFirmwareTypeEfi {
-				log.WithFields(log.Fields{
-					"volume_id": volume.ID,
-				}).Info("Setting volume to be UEFI")
-				err := volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
-					Metadata: map[string]string{
-						"hw_machine_type":  "q35",
-						"hw_firmware_type": "uefi",
-					},
-				}).ExtractErr()
-				if err != nil {
-					return err
-				}
-			}
-			// FIXME: review this and see if we can be combined with a block above
-			log.WithFields(log.Fields{
-				"volume_id": volume.ID,
-			}).Info("Setting volume to be SCSI")
-			err = volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
-				Metadata: map[string]string{
-					"hw_disk_bus":   "scsi",
-					"hw_scsi_model": "virtio-scsi",
-				},
-			}).ExtractErr()
-			if err != nil {
-				return err
-			}
 		}
 	} else if err != nil {
 		return err

@@ -162,6 +162,8 @@ There are a few optional flags to define the following:
               destination machine.  Should be disabled with caution as it may
               result in an unbootable instance. To disable flag must be passed
               with an =false e.g. `--run-v2v=false`
+   `--disk-bus-type`: Flag to define volume disk bus type, currently only supports
+                     scsi and virtio.
 
 ## Contributing
 
