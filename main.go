@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"slices"
-	"strings"
 
 	"github.com/erikgeiser/promptkit/confirmation"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
@@ -33,7 +32,7 @@ var (
 	networkMapping   cmd.NetworkMappingFlag
 	availabilityZone string
 	volumeType       string
-	securityGroups   string
+	securityGroups   []string
 	enablev2v        bool
 	busType          string
 )
@@ -182,9 +181,8 @@ var cutoverCmd = &cobra.Command{
 		}).Info("Flavor exists, ensuring network resources exist")
 
 		v := openstack.PortCreateOpts{}
-		if securityGroups != "" {
-			sg := strings.Split(securityGroups, ",")
-			v.SecurityGroups = &sg
+		if len(securityGroups) > 0 {
+			v.SecurityGroups = &securityGroups
 		}
 		ctx = context.WithValue(ctx, "portCreateOpts", &v)
 
@@ -270,7 +268,7 @@ func init() {
 	cutoverCmd.Flags().Var(&networkMapping, "network-mapping", "Network mapping (e.g. 'mac=00:11:22:33:44:55,network-id=6bafb3d3-9d4d-4df1-86bb-bb7403403d24,subnet-id=47ed1da7-82d4-4e67-9bdd-5cb4993e06ff[,ip=1.2.3.4]')")
 	cutoverCmd.MarkFlagRequired("network-mapping")
 
-	cutoverCmd.Flags().StringVar(&securityGroups, "security-groups", "", "Openstack security groups, comma separated (e.g. '42c5a89e-4034-4f2a-adea-b33adc9614f4,6647122c-2d46-42f1-bb26-f38007730fdc')")
+	cutoverCmd.Flags().StringSliceVar(&securityGroups, "security-groups", nil, "Openstack security groups, comma separated (e.g. '42c5a89e-4034-4f2a-adea-b33adc9614f4,6647122c-2d46-42f1-bb26-f38007730fdc')")
 
 	cutoverCmd.Flags().BoolVar(&enablev2v, "run-v2v", true, "Run virt2v-inplace on destination VM")
 

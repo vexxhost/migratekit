@@ -82,11 +82,6 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 		volumeMetadata["hw_scsi_model"] = "virtio-scsi"
 	}
 
-	if types.GuestOsDescriptorFirmwareType(o.Config.Firmware) == types.GuestOsDescriptorFirmwareTypeEfi {
-		volumeMetadata["hw_machine_type"] = "q35"
-		volumeMetadata["hw_firmware_type"] = "uefi"
-	}
-
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		log.Info("Creating new volume")
 		volume, err = volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
@@ -118,6 +113,20 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 				return err
 			}
 
+			if types.GuestOsDescriptorFirmwareType(o.Config.Firmware) == types.GuestOsDescriptorFirmwareTypeEfi {
+				log.WithFields(log.Fields{
+					"volume_id": volume.ID,
+				}).Info("Setting volume to be UEFI")
+				err := volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
+					Metadata: map[string]string{
+						"hw_machine_type":  "q35",
+						"hw_firmware_type": "uefi",
+					},
+				}).ExtractErr()
+				if err != nil {
+					return err
+				}
+			}
 		}
 	} else if err != nil {
 		return err
