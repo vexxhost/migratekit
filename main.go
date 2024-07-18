@@ -5,12 +5,12 @@ import (
 	"errors"
 	"net/url"
 	"os"
-	"slices"
 
 	"github.com/erikgeiser/promptkit/confirmation"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/thediveo/enumflag/v2"
 	"github.com/vexxhost/migratekit/cmd"
 	"github.com/vexxhost/migratekit/internal/openstack"
 	"github.com/vexxhost/migratekit/internal/target"
@@ -23,6 +23,18 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 )
 
+type BusTypeOpts enumflag.Flag
+
+const (
+	Virtio BusTypeOpts = iota
+	Scsi
+)
+
+var BusTypeOptsIds = map[BusTypeOpts][]string{
+	Virtio: {"virtio"},
+	Scsi:   {"scsi"},
+}
+
 var (
 	endpoint         string
 	username         string
@@ -34,7 +46,7 @@ var (
 	volumeType       string
 	securityGroups   []string
 	enablev2v        bool
-	busType          string
+	busType          BusTypeOpts
 )
 
 var rootCmd = &cobra.Command{
@@ -50,10 +62,10 @@ var rootCmd = &cobra.Command{
 
 		var err error
 
-		validBuses := []string{"scsi", "virtio"}
-		if !slices.Contains(validBuses, busType) {
-			log.Fatal("Invalid bus type: ", busType, ". Valid options are: ", validBuses)
-		}
+		// validBuses := []string{"scsi", "virtio"}
+		// if !slices.Contains(validBuses, busType) {
+		// 	log.Fatal("Invalid bus type: ", busType, ". Valid options are: ", validBuses)
+		// }
 
 		thumbprint, err := vmware.GetEndpointThumbprint(endpointUrl)
 		if err != nil {
@@ -108,10 +120,11 @@ var rootCmd = &cobra.Command{
 			Thumbprint: thumbprint,
 		})
 
+		log.Info("Setting Disk Bus: ", BusTypeOptsIds[busType][0])
 		v := target.VolumeCreateOpts{
 			AvailabilityZone: availabilityZone,
 			VolumeType:       volumeType,
-			BusType:          busType,
+			BusType:          BusTypeOptsIds[busType][0],
 		}
 		ctx = context.WithValue(ctx, "volumeCreateOpts", &v)
 
@@ -260,7 +273,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&volumeType, "volume-type", "", "Openstack volume type")
 
-	rootCmd.PersistentFlags().StringVar(&busType, "disk-bus-type", "virtio", "Specifies the type of disk controller to attach disk devices to.")
+	rootCmd.PersistentFlags().Var(enumflag.New(&busType, "disk-bus-type", BusTypeOptsIds, enumflag.EnumCaseInsensitive), "disk-bus-type", "Specifies the type of disk controller to attach disk devices to.")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")
