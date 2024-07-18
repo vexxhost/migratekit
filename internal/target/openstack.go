@@ -265,13 +265,10 @@ func (t *OpenStack) WriteChangeID(ctx context.Context, changeID *vmware.ChangeID
 		return nil
 	}
 
+	volume.Metadata["change_id"] = changeID.Value
+
 	_, err = volumes.Update(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.UpdateOpts{
-		Metadata: map[string]string{
-			"migrate_kit": "true",
-			"vm":          t.VirtualMachine.Reference().Value,
-			"disk":        t.Disk.DiskObjectId,
-			"change_id":   changeID.Value,
-		},
+		Metadata: volume.Metadata,
 	}).Extract()
 
 	return err
