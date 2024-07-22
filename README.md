@@ -39,6 +39,15 @@ which is shipped with all of the dependencies required to run Migratekit except
 for the [VMware Disk Development Kit (VDDK)](https://developer.broadcom.com/sdks/vmware-virtual-disk-development-kit-vddk/8.0) which you will need to download
 from the VMware website.
 
+> [!NOTE]
+> At the moment, Migratekit only supports VMware hypervisors that expose an API
+> endpoint.  If you see the following error message, it means that Migratekit
+> does not support your VMware hypervisor:
+>
+> ```
+> Error: ServerFaultCode: Current license or ESXi version prohibits execution of the requested operation.
+> ```
+
 ### Installing VDDK
 
 In order to be able to use Migratekit, you will need to download the VDDK from
