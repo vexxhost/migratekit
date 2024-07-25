@@ -25,6 +25,10 @@ type ClientSet struct {
 	Networking   *gophercloud.ServiceClient
 }
 
+type PortCreateOpts struct {
+	SecurityGroups *[]string
+}
+
 func NewClientSet(ctx context.Context) (*ClientSet, error) {
 	opts, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
@@ -133,12 +137,14 @@ func (c *ClientSet) EnsurePortsForVirtualMachine(ctx context.Context, vm *object
 				}
 			}
 
+			opts := ctx.Value("portCreateOpts").(*PortCreateOpts)
 			port, err = ports.Create(ctx, c.Networking, ports.CreateOpts{
-				NetworkID:   mapping.NetworkID.String(),
-				Name:        card.DeviceInfo.GetDescription().Label,
-				Description: card.DeviceInfo.GetDescription().Summary,
-				MACAddress:  card.MacAddress,
-				FixedIPs:    ips,
+				NetworkID:      mapping.NetworkID.String(),
+				Name:           card.DeviceInfo.GetDescription().Label,
+				Description:    card.DeviceInfo.GetDescription().Summary,
+				MACAddress:     card.MacAddress,
+				FixedIPs:       ips,
+				SecurityGroups: opts.SecurityGroups,
 			}).Extract()
 			if err != nil {
 				return nil, err
@@ -179,6 +185,7 @@ func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *ob
 
 	var blockDevices []servers.BlockDevice
 	disks := devices.SelectByType((*types.VirtualDisk)(nil))
+	diskIndex := 0
 	for _, disk := range disks {
 		vd := disk.(*types.VirtualDisk)
 		volume, err := c.GetVolumeForDisk(ctx, vm, vd)
@@ -187,10 +194,12 @@ func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *ob
 		}
 
 		blockDevices = append(blockDevices, servers.BlockDevice{
+			BootIndex:       diskIndex,
 			SourceType:      servers.SourceVolume,
 			UUID:            volume.ID,
 			DestinationType: servers.DestinationVolume,
 		})
+		diskIndex++
 	}
 
 	server, err := servers.Create(ctx, c.Compute, servers.CreateOpts{

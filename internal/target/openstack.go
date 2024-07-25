@@ -24,6 +24,12 @@ type OpenStack struct {
 	ClientSet      *openstack.ClientSet
 }
 
+type VolumeCreateOpts struct {
+	AvailabilityZone string
+	VolumeType       string
+	BusType          string
+}
+
 func NewOpenStack(ctx context.Context, vm *object.VirtualMachine, disk *types.VirtualDisk) (*OpenStack, error) {
 	clientSet, err := openstack.NewClientSet(ctx)
 	if err != nil {
@@ -63,16 +69,27 @@ func findDevice(volumeID string) (string, error) {
 
 func (t *OpenStack) Connect(ctx context.Context) error {
 	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volumeMetadata := map[string]string{
+		"migrate_kit": "true",
+		"vm":          t.VirtualMachine.Reference().Value,
+		"disk":        t.Disk.DiskObjectId,
+	}
+
+	opts := ctx.Value("volumeCreateOpts").(*VolumeCreateOpts)
+
+	if opts.BusType == "scsi" {
+		volumeMetadata["hw_disk_bus"] = "scsi"
+		volumeMetadata["hw_scsi_model"] = "virtio-scsi"
+	}
+
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		log.Info("Creating new volume")
 		volume, err = volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
-			Name: DiskLabel(t.VirtualMachine, t.Disk),
-			Size: int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
-			Metadata: map[string]string{
-				"migrate_kit": "true",
-				"vm":          t.VirtualMachine.Reference().Value,
-				"disk":        t.Disk.DiskObjectId,
-			},
+			Name:             DiskLabel(t.VirtualMachine, t.Disk),
+			Size:             int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
+			AvailabilityZone: opts.AvailabilityZone,
+			VolumeType:       opts.VolumeType,
+			Metadata:         volumeMetadata,
 		}, nil).Extract()
 		if err != nil {
 			return err
@@ -248,13 +265,10 @@ func (t *OpenStack) WriteChangeID(ctx context.Context, changeID *vmware.ChangeID
 		return nil
 	}
 
+	volume.Metadata["change_id"] = changeID.Value
+
 	_, err = volumes.Update(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.UpdateOpts{
-		Metadata: map[string]string{
-			"migrate_kit": "true",
-			"vm":          t.VirtualMachine.Reference().Value,
-			"disk":        t.Disk.DiskObjectId,
-			"change_id":   changeID.Value,
-		},
+		Metadata: volume.Metadata,
 	}).Extract()
 
 	return err

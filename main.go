@@ -10,8 +10,10 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/thediveo/enumflag/v2"
 	"github.com/vexxhost/migratekit/cmd"
 	"github.com/vexxhost/migratekit/internal/openstack"
+	"github.com/vexxhost/migratekit/internal/target"
 	"github.com/vexxhost/migratekit/internal/vmware"
 	"github.com/vexxhost/migratekit/internal/vmware_nbdkit"
 	"github.com/vmware/govmomi"
@@ -21,13 +23,30 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 )
 
+type BusTypeOpts enumflag.Flag
+
+const (
+	Virtio BusTypeOpts = iota
+	Scsi
+)
+
+var BusTypeOptsIds = map[BusTypeOpts][]string{
+	Virtio: {"virtio"},
+	Scsi:   {"scsi"},
+}
+
 var (
-	endpoint       string
-	username       string
-	password       string
-	path           string
-	flavorId       string
-	networkMapping cmd.NetworkMappingFlag
+	endpoint         string
+	username         string
+	password         string
+	path             string
+	flavorId         string
+	networkMapping   cmd.NetworkMappingFlag
+	availabilityZone string
+	volumeType       string
+	securityGroups   []string
+	enablev2v        bool
+	busType          BusTypeOpts
 )
 
 var rootCmd = &cobra.Command{
@@ -42,6 +61,12 @@ var rootCmd = &cobra.Command{
 		}
 
 		var err error
+
+		// validBuses := []string{"scsi", "virtio"}
+		// if !slices.Contains(validBuses, busType) {
+		// 	log.Fatal("Invalid bus type: ", busType, ". Valid options are: ", validBuses)
+		// }
+
 		thumbprint, err := vmware.GetEndpointThumbprint(endpointUrl)
 		if err != nil {
 			return err
@@ -95,6 +120,14 @@ var rootCmd = &cobra.Command{
 			Thumbprint: thumbprint,
 		})
 
+		log.Info("Setting Disk Bus: ", BusTypeOptsIds[busType][0])
+		v := target.VolumeCreateOpts{
+			AvailabilityZone: availabilityZone,
+			VolumeType:       volumeType,
+			BusType:          BusTypeOptsIds[busType][0],
+		}
+		ctx = context.WithValue(ctx, "volumeCreateOpts", &v)
+
 		cmd.SetContext(ctx)
 
 		return nil
@@ -105,7 +138,7 @@ var migrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Run a migration cycle",
 	Long: `This command will run a migration cycle on the virtual machine without shutting off the source virtual machine.
-	
+
 - If no data for this virtual machine exists on the target, it will do a full copy.
 - If data exists on the target, it will only copy the changed blocks.
 
@@ -133,7 +166,7 @@ var cutoverCmd = &cobra.Command{
 	Use:   "cutover",
 	Short: "Cutover to the new virtual machine",
 	Long: `This commands will cutover into the OpenStack virtual machine from VMware by executing the following steps:
-	
+
 - Run a migration cycle
 - Shut down the source virtual machine
 - Run a final migration cycle to capture missing changes & run virt-v2v-in-place
@@ -159,6 +192,12 @@ var cutoverCmd = &cobra.Command{
 		log.WithFields(log.Fields{
 			"flavor": flavor.Name,
 		}).Info("Flavor exists, ensuring network resources exist")
+
+		v := openstack.PortCreateOpts{}
+		if len(securityGroups) > 0 {
+			v.SecurityGroups = &securityGroups
+		}
+		ctx = context.WithValue(ctx, "portCreateOpts", &v)
 
 		networks, err := clients.EnsurePortsForVirtualMachine(ctx, vm, &networkMapping)
 		if err != nil {
@@ -197,7 +236,7 @@ var cutoverCmd = &cobra.Command{
 		}
 
 		servers = vmware_nbdkit.NewNbdkitServers(vddkConfig, vm)
-		err = servers.MigrationCycle(ctx, true)
+		err = servers.MigrationCycle(ctx, enablev2v)
 		if err != nil {
 			return err
 		}
@@ -230,11 +269,21 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&path, "vmware-path", "", "VMware VM path (e.g. '/Datacenter/vm/VM')")
 	rootCmd.MarkPersistentFlagRequired("vmware-path")
 
+	rootCmd.PersistentFlags().StringVar(&availabilityZone, "availability-zone", "", "Openstack availability zone for blockdevice & server")
+
+	rootCmd.PersistentFlags().StringVar(&volumeType, "volume-type", "", "Openstack volume type")
+
+	rootCmd.PersistentFlags().Var(enumflag.New(&busType, "disk-bus-type", BusTypeOptsIds, enumflag.EnumCaseInsensitive), "disk-bus-type", "Specifies the type of disk controller to attach disk devices to.")
+
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")
 
 	cutoverCmd.Flags().Var(&networkMapping, "network-mapping", "Network mapping (e.g. 'mac=00:11:22:33:44:55,network-id=6bafb3d3-9d4d-4df1-86bb-bb7403403d24,subnet-id=47ed1da7-82d4-4e67-9bdd-5cb4993e06ff[,ip=1.2.3.4]')")
 	cutoverCmd.MarkFlagRequired("network-mapping")
+
+	cutoverCmd.Flags().StringSliceVar(&securityGroups, "security-groups", nil, "Openstack security groups, comma separated (e.g. '42c5a89e-4034-4f2a-adea-b33adc9614f4,6647122c-2d46-42f1-bb26-f38007730fdc')")
+
+	cutoverCmd.Flags().BoolVar(&enablev2v, "run-v2v", true, "Run virt2v-inplace on destination VM")
 
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(cutoverCmd)
