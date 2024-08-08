@@ -1,32 +1,11 @@
-- secret:
-    name: registry-credentials
-    data:
-      registry.atmosphere.dev:
-        username: robot$migratekit
-        password: !encrypted/pkcs1-oaep
-          - IJ5yVsrMS71RukqgwEZ0OkI6rwlybip5fshOLZJdWtTF2vK6nkd8vJoPLZJOFodsElcnA
-            lTJDcUYr11FNfu4hjZpg2hnS7ZbTpkMOGg012FYnpPQY4FjzMQ67h61ZxiNvToEG+/JTj
-            5U/f+7+m9I+t0F1XRZ5TPASHXRLksEDN+7cWTTgmIhT7kowaCeCn+iGjK4AKXiAvL76WG
-            YbEeqlrWLdhMYsduUAKyHSgAmWu0jKAEVKjikSREz2JGTTtQYvPf1gWlnYbRFGK2bz9ck
-            oowk0vI31lQ5kWy38wG3+1GaiIZxSqtEWv3G2RDZzbCZ6a26RHG6sus2L6Zi3xTJuQ298
-            XtAq0d4l9ADgXa6bjkiEEP4YG723Vl4ad1AYXK5kFLMri8nHqownKtPlAfBfj8ZFBiEpk
-            Ay8g2WJt+22umVwvKT+TNmaQ9kugAHcINSkvu2uf9j4FNxqFS6LEa9YW7SJOikxn9wntW
-            0i7MK5xIEgBKRJabvCp+zbKZQepPapR8RKeqoBhxEPlpXqWa0TZmHUtTginVL4xFLUipz
-            2SZ3qANxaMEtUBdYduzqO5M3T74vg0DJ/vLW1vGZEuuIpUh4TptOOG+D9sx3vr4VAvr/Z
-            Oc5Jat0Kphpt12aHkUhCq1PWb0b1LDQSe6yM+B+LMSaIoObOh5o4C92r3VFjLs=
+# Copyright (c) 2024 VEXXHOST, Inc.
+# SPDX-License-Identifier: Apache-2.0
 
 - job:
     name: migratekit-build-container-image
     parent: ci-build-container-image
     vars: &container_image_vars
-      container_command: docker
-      promote_container_image_method: intermediate-registry
       promote_container_image_job: migratekit-upload-container-image
-      buildset_registry_namespaces:
-        - ['docker.io', 'https://registry-1.docker.io']
-        - ['quay.io', 'https://quay.io']
-        - ['gcr.io', 'https://gcr.io']
-        - ['registry.atmosphere.dev', 'https://registry.atmosphere.dev']
       container_images:
         - context: .
           registry: registry.atmosphere.dev
@@ -40,21 +19,11 @@
     name: migratekit-upload-container-image
     parent: ci-upload-container-image
     vars: *container_image_vars
-    secrets:
-      name: container_registry_credentials
-      secret: registry-credentials
-      pass-to-parent: true
 
 - job:
     name: migratekit-promote-container-image
     parent: ci-promote-container-image
     vars: *container_image_vars
-    secrets:
-      name: container_registry_credentials
-      secret: registry-credentials
-      pass-to-parent: true
-    nodeset:
-      nodes: []
 
 - project:
     merge-mode: squash-merge
