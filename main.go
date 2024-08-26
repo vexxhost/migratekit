@@ -92,10 +92,10 @@ var rootCmd = &cobra.Command{
 				}
 
 				for _, vm := range vms {
-					log.Info(vm.InventoryPath)
+					log.Info(" - ", vm.InventoryPath)
 				}
 
-				return nil
+				return err
 			default:
 				return err
 			}
