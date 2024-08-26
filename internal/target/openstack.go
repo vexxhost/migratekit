@@ -84,13 +84,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		log.Info("Creating new volume")
-		volume, err = volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
-			Name:             DiskLabel(t.VirtualMachine, t.Disk),
-			Size:             int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
-			AvailabilityZone: opts.AvailabilityZone,
-			VolumeType:       opts.VolumeType,
-			Metadata:         volumeMetadata,
-		}, nil).Extract()
+		volume, err := t.createVolume(ctx, opts, volumeMetadata)
 		if err != nil {
 			return err
 		}
@@ -189,6 +183,30 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, metadata map[string]string) (*volumes.Volume, error) {
+	log.Info("Creating new volume")
+	volume, err := volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
+		Name:             DiskLabel(t.VirtualMachine, t.Disk),
+		Size:             int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
+		AvailabilityZone: opts.AvailabilityZone,
+		VolumeType:       opts.VolumeType,
+		Metadata:         metadata,
+	}, nil).Extract()
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	err = volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
+	if err != nil {
+		return nil, errors.Join(errors.New("timed out waiting for volume to be available"), err)
+	}
+
+	return volume, nil
 }
 
 func (t *OpenStack) GetPath(ctx context.Context) (string, error) {
