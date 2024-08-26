@@ -80,8 +80,25 @@ var rootCmd = &cobra.Command{
 
 		finder := find.NewFinder(conn.Client)
 		vm, err := finder.VirtualMachine(ctx, path)
+
 		if err != nil {
-			return err
+			switch err.(type) {
+			case *find.NotFoundError:
+				log.WithError(err).Error("Virtual machine not found, list of all virtual machines:")
+
+				vms, err := finder.VirtualMachineList(ctx, "*")
+				if err != nil {
+					return err
+				}
+
+				for _, vm := range vms {
+					log.Info(" - ", vm.InventoryPath)
+				}
+
+				os.Exit(1)
+			default:
+				return err
+			}
 		}
 
 		var o mo.VirtualMachine
