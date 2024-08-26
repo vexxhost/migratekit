@@ -95,7 +95,7 @@ var rootCmd = &cobra.Command{
 					log.Info(" - ", vm.InventoryPath)
 				}
 
-				return err
+				os.Exit(1)
 			default:
 				return err
 			}
