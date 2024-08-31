@@ -87,6 +87,7 @@ following command to run the Migratekit Docker container:
 
 ```bash
 docker run -it --rm --privileged \
+  --network host \
   -v /dev:/dev \
   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
@@ -99,6 +100,7 @@ it with the following command:
 
 ```bash
 docker run -it --rm --privileged \
+  --network host \
   -v /dev:/dev \
   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
@@ -124,6 +126,7 @@ cutover, you can run the following command to cutover to the OpenStack cloud:
 
 ```bash
 docker run -it --rm --privileged \
+  --network host \
   -v /dev:/dev \
   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
@@ -193,6 +196,7 @@ command to run a development environment for Migratekit:
 
 ```bash
 docker run -it --rm --privileged \
+  --network host \
   -v /dev:/dev \
   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   -v $(pwd):/app \
