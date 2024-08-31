@@ -84,7 +84,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		log.Info("Creating new volume")
-		volume, err := t.createVolume(ctx, opts, volumeMetadata)
+		volume, err = t.createVolume(ctx, opts, volumeMetadata)
 		if err != nil {
 			return err
 		}
