@@ -2,7 +2,10 @@ package openstack
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -35,7 +38,28 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 		return nil, err
 	}
 
-	provider, err := openstack.AuthenticatedClient(ctx, opts)
+	provider, err := openstack.NewClient(opts.IdentityEndpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	ua := gophercloud.UserAgent{}
+	ua.Prepend("migratekit")
+	provider.UserAgent = ua
+
+	config := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	if os.Getenv("OS_INSECURE") == "true" {
+		config.InsecureSkipVerify = true
+	}
+
+	provider.HTTPClient.Transport = &http.Transport{
+		TLSClientConfig: config,
+	}
+
+	err = openstack.Authenticate(ctx, provider, opts)
 	if err != nil {
 		return nil, err
 	}
