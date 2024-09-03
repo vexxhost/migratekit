@@ -24,6 +24,7 @@ import (
 const MaxChunkSize = 64 * 1024 * 1024
 
 type VddkConfig struct {
+	Debug      bool
 	Endpoint   *url.URL
 	Thumbprint string
 }
@@ -353,7 +354,14 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 		log.Info("Running virt-v2v-in-place")
 
 		os.Setenv("LIBGUESTFS_BACKEND", "direct")
-		cmd := exec.Command("virt-v2v-in-place", "-i", "disk", path)
+
+		var cmd *exec.Cmd
+		if s.Servers.VddkConfig.Debug {
+			cmd = exec.Command("virt-v2v-in-place", "-v", "-x", "-i", "disk", path)
+		} else {
+			cmd = exec.Command("virt-v2v-in-place", "-i", "disk", path)
+		}
+
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 

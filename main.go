@@ -36,6 +36,7 @@ var BusTypeOptsIds = map[BusTypeOpts][]string{
 }
 
 var (
+	debug            bool
 	endpoint         string
 	username         string
 	password         string
@@ -53,6 +54,10 @@ var rootCmd = &cobra.Command{
 	Use:   "migratekit",
 	Short: "Near-live migration toolkit for VMware to OpenStack",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if debug {
+			log.SetLevel(log.DebugLevel)
+		}
+
 		endpointUrl := &url.URL{
 			Scheme: "https",
 			Host:   endpoint,
@@ -133,6 +138,7 @@ var rootCmd = &cobra.Command{
 
 		ctx = context.WithValue(ctx, "vm", vm)
 		ctx = context.WithValue(ctx, "vddkConfig", &vmware_nbdkit.VddkConfig{
+			Debug:      debug,
 			Endpoint:   endpointUrl,
 			Thumbprint: thumbprint,
 		})
@@ -272,7 +278,7 @@ var cutoverCmd = &cobra.Command{
 }
 
 func init() {
-	log.SetLevel(log.DebugLevel)
+	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging")
 
 	rootCmd.PersistentFlags().StringVar(&endpoint, "vmware-endpoint", "", "VMware endpoint (hostname or IP only)")
 	rootCmd.MarkPersistentFlagRequired("vmware-endpoint")
