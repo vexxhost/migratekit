@@ -80,6 +80,7 @@ func (b *NbdkitBuilder) Build() (*NbdkitServer, error) {
 		"compression=skipz",
 		fmt.Sprintf("vm=moref=%s", b.vm),
 		fmt.Sprintf("snapshot=%s", b.snapshot),
+		"transports=file:nbdssl:nbd",
 		b.filename,
 	)
 
