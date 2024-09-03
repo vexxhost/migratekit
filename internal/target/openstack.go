@@ -246,6 +246,14 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+
+		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+
+		err = volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
+		if err != nil {
+			return errors.Join(errors.New("timed out waiting for volume to be available"), err)
+		}
 	}
 
 	return nil
