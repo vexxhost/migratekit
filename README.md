@@ -85,6 +85,10 @@ to be able to use Migratekit:
 Assuming that you already have Docker installed on your system, you can use the
 following command to run the Migratekit Docker container:
 
+> [!WARNING]
+> Ubuntu Noble Numbat (24.04) LTS was released with additional restrictions on [unprivileged user namespaces](https://discourse.ubuntu.com/t/ubuntu-24-04-lts-noble-numbat-release-notes/39890#unprivileged-user-namespace-restrictions),
+> we suggest either disabling them or using Ubuntu Jammy Jellyfish (22.04) LTS until a solution is found.
+
 ```bash
 docker run -it --rm --privileged \
   --network host \
