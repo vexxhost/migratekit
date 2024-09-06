@@ -182,10 +182,14 @@ func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) error {
 		}
 	}()
 
-	for _, server := range s.Servers {
+	for index, server := range s.Servers {
 		t, err := target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
 		if err != nil {
 			return err
+		}
+
+		if index != 0 {
+			runV2V = false
 		}
 
 		err = server.SyncToTarget(ctx, t, runV2V)
