@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/erikgeiser/promptkit/confirmation"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
@@ -16,10 +17,13 @@ import (
 	"github.com/vexxhost/migratekit/internal/target"
 	"github.com/vexxhost/migratekit/internal/vmware"
 	"github.com/vexxhost/migratekit/internal/vmware_nbdkit"
-	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
+	"github.com/vmware/govmomi/session"
+	"github.com/vmware/govmomi/session/keepalive"
+	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/mo"
+	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
 )
 
@@ -78,12 +82,28 @@ var rootCmd = &cobra.Command{
 		}
 
 		ctx := context.TODO()
-		conn, err := govmomi.NewClient(ctx, endpointUrl, true)
+
+		soapClient := soap.NewClient(endpointUrl, true)
+		vimClient, err := vim25.NewClient(ctx, soapClient)
 		if err != nil {
+			log.WithError(err).Error("Failed to create VMware client")
 			return err
 		}
 
-		finder := find.NewFinder(conn.Client)
+		vimClient.RoundTripper = keepalive.NewHandlerSOAP(
+			vimClient.RoundTripper,
+			15*time.Second,
+			nil,
+		)
+
+		mgr := session.NewManager(vimClient)
+		err = mgr.Login(ctx, endpointUrl.User)
+		if err != nil {
+			log.WithError(err).Error("Failed to login to VMware")
+			return err
+		}
+
+		finder := find.NewFinder(vimClient)
 		vm, err := finder.VirtualMachine(ctx, path)
 
 		if err != nil {
