@@ -361,9 +361,9 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 
 		var cmd *exec.Cmd
 		if s.Servers.VddkConfig.Debug {
-			cmd = exec.Command("virt-v2v-in-place", "-v", "-x", "-i", "disk", path)
+			cmd = exec.Command("virt-v2v-in-place", "-v", "-x", "--no-selinux-relabel", "-i", "disk", path)
 		} else {
-			cmd = exec.Command("virt-v2v-in-place", "-i", "disk", path)
+			cmd = exec.Command("virt-v2v-in-place", "--no-selinux-relabel", "-i", "disk", path)
 		}
 
 		cmd.Stdout = os.Stdout
