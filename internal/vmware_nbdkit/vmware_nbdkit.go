@@ -99,6 +99,7 @@ func (s *NbdkitServers) Start(ctx context.Context) error {
 				VirtualMachine(s.VirtualMachine.Reference().Value).
 				Snapshot(s.SnapshotRef.Value).
 				Filename(info.FileName).
+				Compression(nbdkit.SkipzCompression).
 				Build()
 			if err != nil {
 				return err
