@@ -22,7 +22,6 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 		return err
 	}
 	defer progressRead.Close()
-	defer progressWrite.Close()
 
 	args := []string{
 		"--progress=3",
@@ -46,6 +45,10 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+
+	// Close the parent's copy of progressWrite
+	// See: https://github.com/golang/go/issues/4261
+	progressWrite.Close()
 
 	bar := progress.DataProgressBar("Full copy", size)
 	go func() {
