@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/thediveo/enumflag/v2"
 	"github.com/vexxhost/migratekit/cmd"
+	"github.com/vexxhost/migratekit/internal/nbdkit"
 	"github.com/vexxhost/migratekit/internal/openstack"
 	"github.com/vexxhost/migratekit/internal/target"
 	"github.com/vexxhost/migratekit/internal/vmware"
@@ -39,19 +40,36 @@ var BusTypeOptsIds = map[BusTypeOpts][]string{
 	Scsi:   {"scsi"},
 }
 
+type CompressionMethodOpts enumflag.Flag
+
+const (
+	None CompressionMethodOpts = iota
+	Zlib
+	Fastlz
+	Skipz
+)
+
+var CompressionMethodOptsIds = map[CompressionMethodOpts][]string{
+	None:   {"none"},
+	Zlib:   {"zlib"},
+	Fastlz: {"fastlz"},
+	Skipz:  {"skipz"},
+}
+
 var (
-	debug            bool
-	endpoint         string
-	username         string
-	password         string
-	path             string
-	flavorId         string
-	networkMapping   cmd.NetworkMappingFlag
-	availabilityZone string
-	volumeType       string
-	securityGroups   []string
-	enablev2v        bool
-	busType          BusTypeOpts
+	debug             bool
+	endpoint          string
+	username          string
+	password          string
+	path              string
+	compressionMethod CompressionMethodOpts = Skipz
+	flavorId          string
+	networkMapping    cmd.NetworkMappingFlag
+	availabilityZone  string
+	volumeType        string
+	securityGroups    []string
+	enablev2v         bool
+	busType           BusTypeOpts
 )
 
 var rootCmd = &cobra.Command{
@@ -158,9 +176,10 @@ var rootCmd = &cobra.Command{
 
 		ctx = context.WithValue(ctx, "vm", vm)
 		ctx = context.WithValue(ctx, "vddkConfig", &vmware_nbdkit.VddkConfig{
-			Debug:      debug,
-			Endpoint:   endpointUrl,
-			Thumbprint: thumbprint,
+			Debug:       debug,
+			Endpoint:    endpointUrl,
+			Thumbprint:  thumbprint,
+			Compression: nbdkit.CompressionMethod(cmd.PersistentFlags().Lookup("compression-method").Value.String()),
 		})
 
 		log.Info("Setting Disk Bus: ", BusTypeOptsIds[busType][0])
@@ -311,6 +330,8 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&path, "vmware-path", "", "VMware VM path (e.g. '/Datacenter/vm/VM')")
 	rootCmd.MarkPersistentFlagRequired("vmware-path")
+
+	rootCmd.PersistentFlags().Var(enumflag.New(&compressionMethod, "compression-method", CompressionMethodOptsIds, enumflag.EnumCaseInsensitive), "compression-method", "Specifies the compression method to use for the disk")
 
 	rootCmd.PersistentFlags().StringVar(&availabilityZone, "availability-zone", "", "Openstack availability zone for blockdevice & server")
 

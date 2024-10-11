@@ -24,9 +24,10 @@ import (
 const MaxChunkSize = 64 * 1024 * 1024
 
 type VddkConfig struct {
-	Debug      bool
-	Endpoint   *url.URL
-	Thumbprint string
+	Debug       bool
+	Endpoint    *url.URL
+	Thumbprint  string
+	Compression nbdkit.CompressionMethod
 }
 
 type NbdkitServers struct {
@@ -99,7 +100,7 @@ func (s *NbdkitServers) Start(ctx context.Context) error {
 				VirtualMachine(s.VirtualMachine.Reference().Value).
 				Snapshot(s.SnapshotRef.Value).
 				Filename(info.FileName).
-				Compression(nbdkit.SkipzCompression).
+				Compression(s.VddkConfig.Compression).
 				Build()
 			if err != nil {
 				return err
