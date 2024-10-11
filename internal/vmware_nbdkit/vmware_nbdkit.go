@@ -297,7 +297,7 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 			}
 		}
 
-		startOffset += diskChangeInfo.StartOffset + diskChangeInfo.Length
+		startOffset = diskChangeInfo.StartOffset + diskChangeInfo.Length
 		bar.Set64(startOffset)
 
 		if startOffset == s.Disk.CapacityInBytes {
