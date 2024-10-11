@@ -3,6 +3,7 @@ package target
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,7 +190,7 @@ func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, me
 	log.Info("Creating new volume")
 	volume, err := volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
 		Name:             DiskLabel(t.VirtualMachine, t.Disk),
-		Size:             int(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024,
+		Size:             int(math.Ceil(float64(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024)),
 		AvailabilityZone: opts.AvailabilityZone,
 		VolumeType:       opts.VolumeType,
 		Metadata:         metadata,

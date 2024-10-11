@@ -179,7 +179,7 @@ var rootCmd = &cobra.Command{
 			Debug:       debug,
 			Endpoint:    endpointUrl,
 			Thumbprint:  thumbprint,
-			Compression: nbdkit.CompressionMethod(cmd.PersistentFlags().Lookup("compression-method").Value.String()),
+			Compression: nbdkit.CompressionMethod(CompressionMethodOptsIds[compressionMethod][0]),
 		})
 
 		log.Info("Setting Disk Bus: ", BusTypeOptsIds[busType][0])
