@@ -6,14 +6,24 @@ import (
 	"os/exec"
 )
 
+type CompressionMethod string
+
+const (
+	NoCompression     CompressionMethod = "none"
+	ZlibCompression   CompressionMethod = "zlib"
+	FastLzCompression CompressionMethod = "fastlz"
+	SkipzCompression  CompressionMethod = "skipz"
+)
+
 type NbdkitBuilder struct {
-	server     string
-	username   string
-	password   string
-	thumbprint string
-	vm         string
-	snapshot   string
-	filename   string
+	server      string
+	username    string
+	password    string
+	thumbprint  string
+	vm          string
+	snapshot    string
+	filename    string
+	compression CompressionMethod
 }
 
 func NewNbdkitBuilder() *NbdkitBuilder {
@@ -55,6 +65,11 @@ func (b *NbdkitBuilder) Filename(filename string) *NbdkitBuilder {
 	return b
 }
 
+func (b *NbdkitBuilder) Compression(method CompressionMethod) *NbdkitBuilder {
+	b.compression = method
+	return b
+}
+
 func (b *NbdkitBuilder) Build() (*NbdkitServer, error) {
 	tmp, err := os.MkdirTemp("", "migratekit-")
 	if err != nil {
@@ -77,7 +92,7 @@ func (b *NbdkitBuilder) Build() (*NbdkitServer, error) {
 		fmt.Sprintf("user=%s", b.username),
 		fmt.Sprintf("password=%s", b.password),
 		fmt.Sprintf("thumbprint=%s", b.thumbprint),
-		"compression=skipz",
+		fmt.Sprintf("compression=%s", b.compression),
 		fmt.Sprintf("vm=moref=%s", b.vm),
 		fmt.Sprintf("snapshot=%s", b.snapshot),
 		"transports=file:nbdssl:nbd",
