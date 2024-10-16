@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -92,7 +93,7 @@ func (c *ClientSet) GetVolumeForDisk(ctx context.Context, vm *object.VirtualMach
 		Metadata: map[string]string{
 			"migrate_kit": "true",
 			"vm":          vm.Reference().Value,
-			"disk":        disk.DiskObjectId,
+			"disk":        strconv.Itoa(int(disk.Key)),
 		},
 	}).AllPages(ctx)
 	if err != nil {
@@ -104,6 +105,18 @@ func (c *ClientSet) GetVolumeForDisk(ctx context.Context, vm *object.VirtualMach
 		return nil, err
 	}
 
+	// Deprecated, ensuring backward compatibility
+	// TODO: remove
+	if len(volumeList) == 0 {
+		volumeList, err = c.GetVolumeListForDiskOld(ctx, vm, disk)
+		if err != nil {
+			return nil, err
+		}
+		if len(volumeList) > 0 {
+			log.Warn("Using deprecated volume name and metadata format")
+		}
+	}
+
 	if len(volumeList) == 0 {
 		return nil, ErrorVolumeNotFound
 	} else if len(volumeList) > 1 {
@@ -111,6 +124,26 @@ func (c *ClientSet) GetVolumeForDisk(ctx context.Context, vm *object.VirtualMach
 	}
 
 	return volumes.Get(ctx, c.BlockStorage, volumeList[0].ID).Extract()
+}
+
+// Deprecated, ensuring backward compatibility
+// TODO: remove
+func (c *ClientSet) GetVolumeListForDiskOld(ctx context.Context, vm *object.VirtualMachine, disk *types.VirtualDisk) ([]volumes.Volume, error) {
+	pages, err := volumes.List(c.BlockStorage, volumes.ListOpts{
+		Name: VolumeNameOld(vm, disk),
+		Metadata: map[string]string{
+			"migrate_kit": "true",
+			"vm":          vm.Reference().Value,
+			"disk":        disk.DiskObjectId,
+		},
+	}).AllPages(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	volumeList, err := volumes.ExtractVolumes(pages)
+
+	return volumeList, err
 }
 
 func (c *ClientSet) EnsurePortsForVirtualMachine(ctx context.Context, vm *object.VirtualMachine, networkMappings *cmd.NetworkMappingFlag) ([]servers.Network, error) {

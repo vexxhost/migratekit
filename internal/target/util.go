@@ -3,6 +3,7 @@ package target
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/gosimple/slug"
 	log "github.com/sirupsen/logrus"
@@ -12,7 +13,7 @@ import (
 )
 
 func DiskLabel(vm *object.VirtualMachine, disk *types.VirtualDisk) string {
-	return slug.Make(vm.Name() + "-" + disk.DiskObjectId)
+	return slug.Make(vm.Name() + "-" + strconv.Itoa(int(disk.Key)))
 }
 
 func NeedsFullCopy(ctx context.Context, t Target) (bool, bool, error) {

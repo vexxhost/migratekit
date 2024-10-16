@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,7 +74,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 	volumeMetadata := map[string]string{
 		"migrate_kit": "true",
 		"vm":          t.VirtualMachine.Reference().Value,
-		"disk":        t.Disk.DiskObjectId,
+		"disk":        strconv.Itoa(int(t.Disk.Key)),
 	}
 
 	opts := ctx.Value("volumeCreateOpts").(*VolumeCreateOpts)
