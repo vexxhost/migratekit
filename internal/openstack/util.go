@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gosimple/slug"
 	"github.com/vmware/govmomi/object"
@@ -41,5 +42,11 @@ func GetCurrentInstanceUUID() (string, error) {
 }
 
 func VolumeName(vm *object.VirtualMachine, disk *types.VirtualDisk) string {
-	return slug.Make(vm.Name() + "-" + disk.DiskObjectId)
+	return slug.Make(vm.Name() + "-" + strconv.Itoa(int(disk.Key)))
+}
+
+// ensuring backward compatibility
+// TODO: remove
+func VolumeNameOld(vm *object.VirtualMachine, disk *types.VirtualDisk) string {
+	return slug.Make(vm.Name() + "-" + string(disk.DiskObjectId))
 }
