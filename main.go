@@ -57,19 +57,20 @@ var CompressionMethodOptsIds = map[CompressionMethodOpts][]string{
 }
 
 var (
-	debug             bool
-	endpoint          string
-	username          string
-	password          string
-	path              string
-	compressionMethod CompressionMethodOpts = Skipz
-	flavorId          string
-	networkMapping    cmd.NetworkMappingFlag
-	availabilityZone  string
-	volumeType        string
-	securityGroups    []string
-	enablev2v         bool
-	busType           BusTypeOpts
+	debug                bool
+	endpoint             string
+	username             string
+	password             string
+	path                 string
+	compressionMethod    CompressionMethodOpts = Skipz
+	flavorId             string
+	networkMapping       cmd.NetworkMappingFlag
+	availabilityZone     string
+	volumeType           string
+	securityGroups       []string
+	enablev2v            bool
+	busType              BusTypeOpts
+	vzUnsafeVolumeByName bool
 )
 
 var rootCmd = &cobra.Command{
@@ -189,6 +190,8 @@ var rootCmd = &cobra.Command{
 			BusType:          BusTypeOptsIds[busType][0],
 		}
 		ctx = context.WithValue(ctx, "volumeCreateOpts", &v)
+
+		ctx = context.WithValue(ctx, "vzUnsafeVolumeByName", vzUnsafeVolumeByName)
 
 		cmd.SetContext(ctx)
 
@@ -338,6 +341,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&volumeType, "volume-type", "", "Openstack volume type")
 
 	rootCmd.PersistentFlags().Var(enumflag.New(&busType, "disk-bus-type", BusTypeOptsIds, enumflag.EnumCaseInsensitive), "disk-bus-type", "Specifies the type of disk controller to attach disk devices to.")
+
+	rootCmd.PersistentFlags().BoolVar(&vzUnsafeVolumeByName, "vz-unsafe-volume-by-name", false, "Only use the name to find a volume - workaround for virtuozzu")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")

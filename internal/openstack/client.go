@@ -94,14 +94,22 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 }
 
 func (c *ClientSet) GetVolumeForDisk(ctx context.Context, vm *object.VirtualMachine, disk *types.VirtualDisk) (*volumes.Volume, error) {
-	pages, err := volumes.List(c.BlockStorage, volumes.ListOpts{
+
+	vzUnsafeVolumeByName := ctx.Value("vzUnsafeVolumeByName").(bool)
+
+	volumsListOpts := volumes.ListOpts{
 		Name: VolumeName(vm, disk),
-		Metadata: map[string]string{
+	}
+
+	if !vzUnsafeVolumeByName {
+		volumsListOpts.Metadata = map[string]string{
 			"migrate_kit": "true",
 			"vm":          vm.Reference().Value,
 			"disk":        strconv.Itoa(int(disk.Key)),
-		},
-	}).AllPages(ctx)
+		}
+	}
+
+	pages, err := volumes.List(c.BlockStorage, volumsListOpts).AllPages(ctx)
 	if err != nil {
 		return nil, err
 	}
