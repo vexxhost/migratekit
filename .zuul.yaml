@@ -8,8 +8,8 @@
       promote_container_image_job: migratekit-upload-container-image
       container_images:
         - context: .
-          registry: registry.atmosphere.dev
-          repository: registry.atmosphere.dev/library/migratekit
+          registry: harbor.atmosphere.dev
+          repository: harbor.atmosphere.dev/library/migratekit
           arch:
             - linux/amd64
           tags:
