@@ -167,6 +167,8 @@ You should ideally match the network mapping to the network that the virtual mac
 is attached to on the VMware side to ensure that the virtual machine can communicate
 with the network once it has been migrated to the OpenStack cloud.
 
+You can use more than one network mapping in case your VMWare machine has more than one.
+
 There are a few optional flags to define the following:
 -  `--security-groups`: A comma separated list of security group UUIDs to apply
                        to the virtual machines port, if not supplied only the
@@ -180,6 +182,7 @@ There are a few optional flags to define the following:
               with an =false e.g. `--run-v2v=false`
    `--disk-bus-type`: Flag to define volume disk bus type, currently only supports
                      scsi and virtio.
+-   `--compression-method`: Compression method: skipz, zlib and none.
 
 ## Contributing
 
