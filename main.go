@@ -308,7 +308,7 @@ var cutoverCmd = &cobra.Command{
 
 		log.Info("Final migration cycle completed, spinning up new OpenStack VM")
 
-		err = clients.CreateResourcesForVirtualMachine(ctx, vm, flavorId, networks)
+		err = clients.CreateResourcesForVirtualMachine(ctx, vm, flavorId, networks, availabilityZone)
 		if err != nil {
 			return err
 		}
@@ -353,6 +353,9 @@ func init() {
 	cutoverCmd.Flags().StringSliceVar(&securityGroups, "security-groups", nil, "Openstack security groups, comma separated (e.g. '42c5a89e-4034-4f2a-adea-b33adc9614f4,6647122c-2d46-42f1-bb26-f38007730fdc')")
 
 	cutoverCmd.Flags().BoolVar(&enablev2v, "run-v2v", true, "Run virt2v-inplace on destination VM")
+
+	cutoverCmd.Flags().StringVar(&availabilityZone, "availability-zone", "", "OpenStack availability zone for blockdevice & server")
+	cutoverCmd.MarkFlagRequired("availability-zone")
 
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(cutoverCmd)
