@@ -71,6 +71,7 @@ var (
 	enablev2v            bool
 	busType              BusTypeOpts
 	vzUnsafeVolumeByName bool
+	osType               string
 )
 
 var rootCmd = &cobra.Command{
@@ -192,6 +193,8 @@ var rootCmd = &cobra.Command{
 		ctx = context.WithValue(ctx, "volumeCreateOpts", &v)
 
 		ctx = context.WithValue(ctx, "vzUnsafeVolumeByName", vzUnsafeVolumeByName)
+
+		ctx = context.WithValue(ctx, "osType", osType)
 
 		cmd.SetContext(ctx)
 
@@ -343,6 +346,8 @@ func init() {
 	rootCmd.PersistentFlags().Var(enumflag.New(&busType, "disk-bus-type", BusTypeOptsIds, enumflag.EnumCaseInsensitive), "disk-bus-type", "Specifies the type of disk controller to attach disk devices to.")
 
 	rootCmd.PersistentFlags().BoolVar(&vzUnsafeVolumeByName, "vz-unsafe-volume-by-name", false, "Only use the name to find a volume - workaround for virtuozzu - dangerous option")
+
+    rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")

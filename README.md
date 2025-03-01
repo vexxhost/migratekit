@@ -183,6 +183,11 @@ There are a few optional flags to define the following:
    `--disk-bus-type`: Flag to define volume disk bus type, currently only supports
                      scsi and virtio.
 -   `--compression-method`: Compression method: skipz, zlib and none.
+-   `--os-type`: Sets the "os_type" volume (image) metadata variable.
+                 If set to "auto", it tries to recognize the correct operating
+                 system via the VMware GuestId.
+                 Valid values for the most OpenStack installations are "linux"
+                 and "windows"
 
 ## Contributing
 

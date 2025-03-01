@@ -103,25 +103,51 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 				return err
 			}
 
+
 			var o mo.VirtualMachine
-			err = t.VirtualMachine.Properties(ctx, t.VirtualMachine.Reference(), []string{"config.firmware"}, &o)
+			err = t.VirtualMachine.Properties(ctx, t.VirtualMachine.Reference(), []string{"config.firmware", "config.guestId", "config.guestFullName"}, &o)
 			if err != nil {
 				return err
 			}
+			log.WithFields(log.Fields{
+				"Config.GuestId":       o.Config.GuestId,
+				"Config.GuestFullName": o.Config.GuestFullName,
+			}).Info("VMware GustId")
+
+			volumeImageMetadata := map[string]string{}
+            switch osTypeCMD := ctx.Value("osType").(string); osTypeCMD{
+                case "auto":
+                    guestIdLower := strings.ToLower(o.Config.GuestId)
+                    vmOsType := "linux" // linux is the default os type, TODO: Add mapping for all possible GuestIds
+                    if strings.Contains(guestIdLower, "windows") {
+                        vmOsType = "windows"
+                    }
+                    volumeImageMetadata["os_type"] = vmOsType
+                case "":
+                default:
+                    volumeImageMetadata["os_type"] = osTypeCMD
+
+            }
+
+            if osType, ok := volumeImageMetadata["os_type"]; ok {
+                log.WithFields(log.Fields{
+                    "volume_id": volume.ID,
+                    "os_type":   osType,
+                }).Info("Volume set os type")
+            }
 
 			if types.GuestOsDescriptorFirmwareType(o.Config.Firmware) == types.GuestOsDescriptorFirmwareTypeEfi {
 				log.WithFields(log.Fields{
 					"volume_id": volume.ID,
 				}).Info("Setting volume to be UEFI")
-				err := volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
-					Metadata: map[string]string{
-						"hw_machine_type":  "q35",
-						"hw_firmware_type": "uefi",
-					},
-				}).ExtractErr()
-				if err != nil {
-					return err
-				}
+				volumeImageMetadata["hw_machine_type"] = "q35"
+				volumeImageMetadata["hw_firmware_type"] = "uefi"
+			}
+			err = volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
+				Metadata: volumeImageMetadata,
+			}).ExtractErr()
+			if err != nil {
+				return err
 			}
 		}
 	} else if err != nil {
