@@ -188,6 +188,7 @@ There are a few optional flags to define the following:
                  system via the VMware GuestId.
                  Valid values for the most OpenStack installations are "linux"
                  and "windows"
+-   `--enable-qemu-guest-agent`: Sets the "hw_qemu_guest_agent" volume (image) metadata parameter to "yes".
 
 ## Contributing
 
