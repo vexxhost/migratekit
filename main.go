@@ -72,6 +72,7 @@ var (
 	busType              BusTypeOpts
 	vzUnsafeVolumeByName bool
 	osType               string
+    enableQemuGuestAgent bool
 )
 
 var rootCmd = &cobra.Command{
@@ -195,6 +196,8 @@ var rootCmd = &cobra.Command{
 		ctx = context.WithValue(ctx, "vzUnsafeVolumeByName", vzUnsafeVolumeByName)
 
 		ctx = context.WithValue(ctx, "osType", osType)
+
+		ctx = context.WithValue(ctx, "enableQemuGuestAgent", enableQemuGuestAgent)
 
 		cmd.SetContext(ctx)
 
@@ -348,6 +351,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&vzUnsafeVolumeByName, "vz-unsafe-volume-by-name", false, "Only use the name to find a volume - workaround for virtuozzu - dangerous option")
 
     rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
+
+    rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")

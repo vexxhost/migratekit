@@ -136,6 +136,14 @@ func (t *OpenStack) Connect(ctx context.Context) error {
                 }).Info("Volume set os type")
             }
 
+            if ctx.Value("enableQemuGuestAgent").(bool) {
+                log.WithFields(log.Fields{
+                    "volume_id": volume.ID,
+                    "hw_qemu_guest_agent":   "yes",
+                }).Info("Volume enable qemu quest agent metadata parameter")
+                volumeImageMetadata["hw_qemu_guest_agent"] = "yes"
+            }
+
 			if types.GuestOsDescriptorFirmwareType(o.Config.Firmware) == types.GuestOsDescriptorFirmwareTypeEfi {
 				log.WithFields(log.Fields{
 					"volume_id": volume.ID,
