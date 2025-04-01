@@ -180,7 +180,7 @@ There are a few optional flags to define the following:
               destination machine.  Should be disabled with caution as it may
               result in an unbootable instance. To disable flag must be passed
               with an =false e.g. `--run-v2v=false`
-   `--disk-bus-type`: Flag to define volume disk bus type, currently only supports
+-   `--disk-bus-type`: Flag to define volume disk bus type, currently only supports
                      scsi and virtio.
 -   `--compression-method`: Compression method: skipz, zlib and none.
 -   `--os-type`: Sets the "os_type" volume (image) metadata variable.
@@ -189,6 +189,7 @@ There are a few optional flags to define the following:
                  Valid values for the most OpenStack installations are "linux"
                  and "windows"
 -   `--enable-qemu-guest-agent`: Sets the "hw_qemu_guest_agent" volume (image) metadata parameter to "yes".
+-   `--custom-trait`: Sets a custom trait to required in the volume (image) metadata for nova scheduling) e.g. `--custom-trait trait:CUSTOM_LICENSING`.
 
 ## Contributing
 
