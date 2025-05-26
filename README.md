@@ -95,7 +95,7 @@ docker run -it --rm --privileged \
   -v /dev:/dev \
   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
-  ghcr.io/vexxhost/migratekit:latest \
+  ghcr.io/vexxhost/migratekit:main \
   --help
 ```
 
@@ -108,7 +108,7 @@ docker run -it --rm --privileged \
   -v /dev:/dev \
   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
-  ghcr.io/vexxhost/migratekit:latest \
+  ghcr.io/vexxhost/migratekit:main \
   migrate \
   --vmware-endpoint vmware.local \
   --vmware-username username \
@@ -134,7 +134,7 @@ docker run -it --rm --privileged \
   -v /dev:/dev \
   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
-  ghcr.io/vexxhost/migratekit:latest \
+  ghcr.io/vexxhost/migratekit:main \
   cutover \
   --vmware-endpoint vmware.local \
   --vmware-username username \
