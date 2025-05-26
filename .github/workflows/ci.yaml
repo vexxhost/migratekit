@@ -33,7 +33,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
       - uses: actions/attest-build-provenance@v2
+        if: github.event_name == 'push'
         with:
-          push-to-registry: ${{ github.event_name == 'push' }}
+          push-to-registry: true
           subject-name: ghcr.io/vexxhost/migratekit
           subject-digest: ${{ steps.push.outputs.digest }}
