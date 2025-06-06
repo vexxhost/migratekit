@@ -2,7 +2,7 @@ module github.com/vexxhost/migratekit
 
 go 1.22
 
-toolchain go1.22.4
+toolchain go1.24.4
 
 require (
 	github.com/erikgeiser/promptkit v0.9.0
