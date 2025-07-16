@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"log"
+	"net/url"
+
+	"github.com/gorilla/websocket"
 	"github.com/k0kubun/go-ansi"
 	"github.com/schollz/progressbar/v3"
 	"github.com/vmware/govmomi/vim25/progress"
@@ -50,16 +54,75 @@ func PercentageProgressBar(task string) *progressbar.ProgressBar {
 }
 
 type VMwareProgressBar struct {
-	bar *progressbar.ProgressBar
-	ch  chan progress.Report
+	bar      *progressbar.ProgressBar
+	ch       chan progress.Report
+	reporter ProgressReporter
 }
+
+type ProgressReporter interface {
+	Percent(percent int, message string)
+}
+
+type ProgressMessage struct {
+	Type    string `json:"type"`
+	Percent int    `json:"percent"`
+	Message string `json:"message"`
+}
+
+type WebSocketProgressReporter struct {
+	conn *websocket.Conn
+}
+
+func NewWebSocketProgressReporter(serverURL string) (*WebSocketProgressReporter, error) {
+	u, err := url.Parse(serverURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid WebSocket URL: %w", err)
+	}
+
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to WebSocket server: %w", err)
+	}
+
+	return &WebSocketProgressReporter{conn: conn}, nil
+}
+func (w *WebSocketProgressReporter) Percent(percent int, message string) {
+	msg := ProgressMessage{
+		Type:    "progress",
+		Percent: percent,
+		Message: message,
+	}
+
+	if err := w.conn.WriteJSON(msg); err != nil {
+		log.Printf("failed to send WebSocket progress message: %v", err)
+	}
+}
+func (w *WebSocketProgressReporter) Close() error {
+	return w.conn.Close()
+}
+
+// func NewVMwareProgressBar(task string) *VMwareProgressBar {
+// 	bar := PercentageProgressBar(task)
+
+// 	return &VMwareProgressBar{
+// 		bar: bar,
+// 		ch:  make(chan progress.Report),
+// 	}
+// }
 
 func NewVMwareProgressBar(task string) *VMwareProgressBar {
 	bar := PercentageProgressBar(task)
 
+	reporter, err := NewWebSocketProgressReporter("ws://141.94.47.176:8080/progress")
+	if err != nil {
+		log.Printf("failed to create websocket reporter, using none: %v", err)
+		reporter = nil // fallback to just terminal bar
+	}
+
 	return &VMwareProgressBar{
-		bar: bar,
-		ch:  make(chan progress.Report),
+		bar:      bar,
+		ch:       make(chan progress.Report),
+		reporter: reporter,
 	}
 }
 
@@ -68,6 +131,13 @@ func (p *VMwareProgressBar) Sink() chan<- progress.Report {
 }
 
 func (u *VMwareProgressBar) Loop(done <-chan struct{}) {
+	defer func() {
+		// Clean WebSocket connection if it's used
+		if ws, ok := u.reporter.(*WebSocketProgressReporter); ok {
+			ws.Close()
+		}
+	}()
+
 	for {
 		select {
 		case <-done:
@@ -82,8 +152,14 @@ func (u *VMwareProgressBar) Loop(done <-chan struct{}) {
 
 			pct := int(report.Percentage())
 			u.bar.Set(pct)
-			if detail := report.Detail(); detail != "" {
-				u.bar.Describe(report.Detail())
+
+			detail := report.Detail()
+			if detail != "" {
+				u.bar.Describe(detail)
+			}
+
+			if u.reporter != nil {
+				u.reporter.Percent(pct, detail)
 			}
 		}
 	}

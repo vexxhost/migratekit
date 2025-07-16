@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/vexxhost/migratekit/internal/progress"
+	"github.com/francoisovh/migratekit/internal/progress"
 )
 
 func Run(source, destination string, size int64, targetIsClean bool) error {
