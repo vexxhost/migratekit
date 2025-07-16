@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/francoisovh/migratekit/internal/openstack"
+	"github.com/francoisovh/migratekit/internal/vmware"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/volumeattach"
 	log "github.com/sirupsen/logrus"
-	"github.com/vexxhost/migratekit/internal/openstack"
-	"github.com/vexxhost/migratekit/internal/vmware"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"

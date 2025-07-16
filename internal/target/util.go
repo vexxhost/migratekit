@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/francoisovh/migratekit/internal/vmware"
 	"github.com/gosimple/slug"
 	log "github.com/sirupsen/logrus"
-	"github.com/vexxhost/migratekit/internal/vmware"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25/types"
 )
