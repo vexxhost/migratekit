@@ -2,16 +2,17 @@ package nbdcopy
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/francoisovh/migratekit/internal/progress"
+	log "github.com/sirupsen/logrus"
 )
 
-func Run(source, destination string, size int64, targetIsClean bool) error {
+func Run(source, destination string, size int64, targetIsClean bool, ctx context.Context) error {
 	logger := log.WithFields(log.Fields{
 		"source":      source,
 		"destination": destination,
@@ -50,18 +51,29 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 	// See: https://github.com/golang/go/issues/4261
 	progressWrite.Close()
 
-	bar := progress.DataProgressBar("Full copy", size)
+	jobIDVal := ctx.Value("jobID")
+	jobID, ok := jobIDVal.(string)
+	if !ok {
+		log.Warn("jobID missing or not a string in context")
+		jobID = "unknown"
+	}
+	pb := progress.NewDataProgressReporter("Full copy", size, nil, jobID)
 	go func() {
 		scanner := bufio.NewScanner(progressRead)
 		for scanner.Scan() {
 			progressParts := strings.Split(scanner.Text(), "/")
-			progress, err := strconv.ParseInt(progressParts[0], 10, 64)
+			progressVal, err := strconv.ParseInt(progressParts[0], 10, 64)
 			if err != nil {
 				log.Error("Error parsing progress: ", err)
 				continue
 			}
 
-			bar.Set64(progress * size / 100)
+			pct := progressVal
+			pb.Bar().Set64(pct * size / 100)
+
+			if pb.Reporter() != nil {
+				pb.Reporter().Percent(int(pct), "Copying data")
+			}
 		}
 
 		if err := scanner.Err(); err != nil {

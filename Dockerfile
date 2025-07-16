@@ -13,4 +13,5 @@ RUN \
   dnf clean all && \
   rm -rf /var/cache/dnf
 COPY --from=build /migratekit /usr/local/bin/migratekit
+ADD vmware-vix-disklib /usr/lib64/vmware-vix-disklib
 ENTRYPOINT ["/usr/local/bin/migratekit"]

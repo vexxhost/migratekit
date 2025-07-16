@@ -57,6 +57,7 @@ type VMwareProgressBar struct {
 	bar      *progressbar.ProgressBar
 	ch       chan progress.Report
 	reporter ProgressReporter
+	jobID    string
 }
 
 type ProgressReporter interface {
@@ -67,10 +68,12 @@ type ProgressMessage struct {
 	Type    string `json:"type"`
 	Percent int    `json:"percent"`
 	Message string `json:"message"`
+	JobID   string `json:"job_id"`
 }
 
 type WebSocketProgressReporter struct {
-	conn *websocket.Conn
+	conn  *websocket.Conn
+	jobID string
 }
 
 func NewWebSocketProgressReporter(serverURL string) (*WebSocketProgressReporter, error) {
@@ -79,18 +82,22 @@ func NewWebSocketProgressReporter(serverURL string) (*WebSocketProgressReporter,
 		return nil, fmt.Errorf("invalid WebSocket URL: %w", err)
 	}
 
+	jobID := u.Query().Get("job_id")
+
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to WebSocket server: %w", err)
 	}
 
-	return &WebSocketProgressReporter{conn: conn}, nil
+	return &WebSocketProgressReporter{conn: conn, jobID: jobID}, nil
 }
+
 func (w *WebSocketProgressReporter) Percent(percent int, message string) {
 	msg := ProgressMessage{
 		Type:    "progress",
 		Percent: percent,
 		Message: message,
+		JobID:   w.jobID,
 	}
 
 	if err := w.conn.WriteJSON(msg); err != nil {
@@ -110,10 +117,10 @@ func (w *WebSocketProgressReporter) Close() error {
 // 	}
 // }
 
-func NewVMwareProgressBar(task string) *VMwareProgressBar {
+func NewVMwareProgressBar(jobID string, task string) *VMwareProgressBar {
 	bar := PercentageProgressBar(task)
 
-	reporter, err := NewWebSocketProgressReporter("ws://141.94.47.176:8080/progress")
+	reporter, err := NewWebSocketProgressReporter("ws://141.94.47.176:8080/progress?job_id=" + jobID)
 	if err != nil {
 		log.Printf("failed to create websocket reporter, using none: %v", err)
 		reporter = nil // fallback to just terminal bar
@@ -128,6 +135,34 @@ func NewVMwareProgressBar(task string) *VMwareProgressBar {
 
 func (p *VMwareProgressBar) Sink() chan<- progress.Report {
 	return p.ch
+}
+
+func NewDataProgressReporter(desc string, size int64, reporter ProgressReporter, jobID string) *VMwareProgressBar {
+	bar := DataProgressBar(desc, size)
+
+	if reporter == nil {
+		r, err := NewWebSocketProgressReporter("ws://141.94.47.176:8080/progress?job_id=" + jobID)
+		if err != nil {
+			log.Printf("Failed to create WebSocket reporter: %v", err)
+			reporter = nil
+		} else {
+			reporter = r
+		}
+	}
+
+	return &VMwareProgressBar{
+		bar:      bar,
+		ch:       make(chan progress.Report),
+		reporter: reporter,
+	}
+}
+
+func (v *VMwareProgressBar) Bar() *progressbar.ProgressBar {
+	return v.bar
+}
+
+func (v *VMwareProgressBar) Reporter() ProgressReporter {
+	return v.reporter
 }
 
 func (u *VMwareProgressBar) Loop(done <-chan struct{}) {

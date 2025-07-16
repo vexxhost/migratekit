@@ -56,8 +56,13 @@ func (s *NbdkitServers) createSnapshot(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	bar := progress.NewVMwareProgressBar("Creating snapshot")
+	jobIDVal := ctx.Value("jobID")
+	jobID, ok := jobIDVal.(string)
+	if !ok {
+		log.Warn("jobID missing or not a string in context")
+		jobID = "unknown"
+	}
+	bar := progress.NewVMwareProgressBar(jobID, "Creating snapshot")
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		bar.Loop(ctx.Done())
@@ -141,8 +146,13 @@ func (s *NbdkitServers) removeSnapshot(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	bar := progress.NewVMwareProgressBar("Removing snapshot")
+	jobIDVal := ctx.Value("jobID")
+	jobID, ok := jobIDVal.(string)
+	if !ok {
+		log.Warn("jobID missing or not a string in context")
+		jobID = "unknown"
+	}
+	bar := progress.NewVMwareProgressBar(jobID, "Removing snapshot")
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		bar.Loop(ctx.Done())
@@ -203,7 +213,7 @@ func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) error {
 	return nil
 }
 
-func (s *NbdkitServer) FullCopyToTarget(t target.Target, path string, targetIsClean bool) error {
+func (s *NbdkitServer) FullCopyToTarget(t target.Target, path string, targetIsClean bool, ctx context.Context) error {
 	logger := log.WithFields(log.Fields{
 		"vm":   s.Servers.VirtualMachine.Name(),
 		"disk": s.Disk.Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName,
@@ -216,6 +226,7 @@ func (s *NbdkitServer) FullCopyToTarget(t target.Target, path string, targetIsCl
 		path,
 		s.Disk.CapacityInBytes,
 		targetIsClean,
+		ctx,
 	)
 	if err != nil {
 		return err
@@ -345,7 +356,7 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 	}
 
 	if needFullCopy {
-		err = s.FullCopyToTarget(t, path, targetIsClean)
+		err = s.FullCopyToTarget(t, path, targetIsClean, ctx)
 		if err != nil {
 			return err
 		}
