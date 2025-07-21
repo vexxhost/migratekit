@@ -2,7 +2,9 @@ package progress
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"time"
 
 	"log"
 	"net/url"
@@ -83,8 +85,12 @@ func NewWebSocketProgressReporter(serverURL string) (*WebSocketProgressReporter,
 	}
 
 	jobID := u.Query().Get("job_id")
-
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	dialer := websocket.Dialer{
+		NetDial: (&net.Dialer{
+			Timeout: 3 * time.Second,
+		}).Dial,
+	}
+	conn, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to WebSocket server: %w", err)
 	}
@@ -120,7 +126,7 @@ func (w *WebSocketProgressReporter) Close() error {
 func NewVMwareProgressBar(jobID string, task string) *VMwareProgressBar {
 	bar := PercentageProgressBar(task)
 
-	reporter, err := NewWebSocketProgressReporter("ws://141.94.47.176:8080/progress?job_id=" + jobID)
+	reporter, err := NewWebSocketProgressReporter("ws://websocket-service.migratekit.svc.cluster.local/progress?job_id=" + jobID)
 	if err != nil {
 		log.Printf("failed to create websocket reporter, using none: %v", err)
 		reporter = nil // fallback to just terminal bar
@@ -141,7 +147,7 @@ func NewDataProgressReporter(desc string, size int64, reporter ProgressReporter,
 	bar := DataProgressBar(desc, size)
 
 	if reporter == nil {
-		r, err := NewWebSocketProgressReporter("ws://141.94.47.176:8080/progress?job_id=" + jobID)
+		r, err := NewWebSocketProgressReporter("ws://websocket-service.migratekit.svc.cluster.local/progress?job_id=" + jobID)
 		if err != nil {
 			log.Printf("Failed to create WebSocket reporter: %v", err)
 			reporter = nil

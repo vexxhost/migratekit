@@ -14,7 +14,6 @@ import (
 	"github.com/francoisovh/migratekit/internal/target"
 	"github.com/francoisovh/migratekit/internal/vmware"
 	"github.com/francoisovh/migratekit/internal/vmware_nbdkit"
-	"github.com/google/uuid"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -71,6 +70,7 @@ var (
 	securityGroups    []string
 	enablev2v         bool
 	busType           BusTypeOpts
+	jobID             string
 )
 
 var rootCmd = &cobra.Command{
@@ -89,7 +89,8 @@ var rootCmd = &cobra.Command{
 		}
 
 		var err error
-		jobID := uuid.NewString()
+		// jobID := os.Getenv("JOB_ID")
+		// jobID := uuid.NewString()
 		// validBuses := []string{"scsi", "virtio"}
 		// if !slices.Contains(validBuses, busType) {
 		// 	log.Fatal("Invalid bus type: ", busType, ". Valid options are: ", validBuses)
@@ -182,6 +183,7 @@ var rootCmd = &cobra.Command{
 			Thumbprint:  thumbprint,
 			Compression: nbdkit.CompressionMethod(CompressionMethodOptsIds[compressionMethod][0]),
 		})
+		// ctx = context.WithValue(context.Background(), "jobID", jobID)
 		ctx = context.WithValue(ctx, "jobID", jobID)
 		log.Info("Starting job : ", jobID)
 		log.Info("Setting Disk Bus: ", BusTypeOptsIds[busType][0])
@@ -338,6 +340,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&volumeType, "volume-type", "", "Openstack volume type")
 
 	rootCmd.PersistentFlags().Var(enumflag.New(&busType, "disk-bus-type", BusTypeOptsIds, enumflag.EnumCaseInsensitive), "disk-bus-type", "Specifies the type of disk controller to attach disk devices to.")
+
+	rootCmd.PersistentFlags().StringVar(&jobID, "jobID", "", "UUID for the job created")
+	rootCmd.MarkPersistentFlagRequired("jobID")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")
