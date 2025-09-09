@@ -1,8 +1,6 @@
 module github.com/vexxhost/migratekit
 
-go 1.23.0
-
-toolchain go1.25.0
+go 1.24.0
 
 require (
 	github.com/erikgeiser/promptkit v0.9.0
@@ -15,7 +13,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/thediveo/enumflag/v2 v2.0.7
 	github.com/vmware/govmomi v0.52.0
-	libguestfs.org/libnbd v1.20.0
+	libguestfs.org/libnbd v1.22.2-4-g3d7cc461d
 )
 
 require (
