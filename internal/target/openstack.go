@@ -104,7 +104,12 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			}
 
 			var o mo.VirtualMachine
-			err = t.VirtualMachine.Properties(ctx, t.VirtualMachine.Reference(), []string{"config.firmware", "config.guestId", "config.guestFullName"}, &o)
+			err = t.VirtualMachine.Properties(ctx, t.VirtualMachine.Reference(), []string{
+				"config.bootOptions",
+				"config.firmware",
+				"config.guestFullName",
+				"config.guestId",
+			}, &o)
 			if err != nil {
 				return err
 			}
@@ -151,14 +156,12 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 				volumeImageMetadata["hw_firmware_type"] = "uefi"
 			}
 
-			if o.Config.BootOptions != nil {
-				if o.Config.BootOptions.EfiSecureBootEnabled != nil {
-					if *o.Config.BootOptions.EfiSecureBootEnabled {
-						log.WithFields(log.Fields{
-							"volume_id": volume.ID,
-						}).Info("Setting volume to be UEFI Secure Boot")
-						volumeImageMetadata["os_secure_boot"] = "required"
-					}
+			if o.Config.BootOptions.EfiSecureBootEnabled != nil {
+				if *o.Config.BootOptions.EfiSecureBootEnabled {
+					log.WithFields(log.Fields{
+						"volume_id": volume.ID,
+					}).Info("Setting volume to be UEFI Secure Boot")
+					volumeImageMetadata["os_secure_boot"] = "required"
 				}
 			}
 
