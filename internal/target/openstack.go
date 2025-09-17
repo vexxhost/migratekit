@@ -151,11 +151,15 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 				volumeImageMetadata["hw_firmware_type"] = "uefi"
 			}
 
-			if o.Config.BootOptions.EfiSecureBootEnabled != nil && *o.Config.BootOptions.EfiSecureBootEnabled {
-				log.WithFields(log.Fields{
-					"volume_id": volume.ID,
-				}).Info("Setting volume to be UEFI Secure Boot")
-				volumeImageMetadata["os_secure_boot"] = "required"
+			if o.Config.BootOptions != nil {
+				if o.Config.BootOptions.EfiSecureBootEnabled != nil {
+					if *o.Config.BootOptions.EfiSecureBootEnabled {
+						log.WithFields(log.Fields{
+							"volume_id": volume.ID,
+						}).Info("Setting volume to be UEFI Secure Boot")
+						volumeImageMetadata["os_secure_boot"] = "required"
+					}
+				}
 			}
 
 			err = volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
