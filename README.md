@@ -80,6 +80,60 @@ to be able to use Migratekit:
 | Guest operations                                 | Allow creation and management of VM snapshots for replication.      | Virtual machines               | VirtualMachine.GuestOperations.*                   |
 | Interaction Power Off                            | Permit powering off the VM during migration to Migratekit.         | Virtual machines               | VirtualMachine.Interact.PowerOff                   |
 
+### Local Disk Backup
+
+Migratekit now supports local disk backup as an alternative to OpenStack targets. This is useful for creating local backups or for testing purposes.
+
+#### Local Disk Features:
+- **CBT Support**: Uses VMware Changed Block Tracking for incremental backups
+- **Change ID Storage**: Stores change IDs in local JSON metadata files
+- **Raw Disk Images**: Creates raw disk images compatible with most virtualization platforms
+- **Directory Structure**: Organizes backups by VM name and disk key
+
+#### Local Disk Usage:
+
+For the first backup (full copy):
+```bash
+migratekit migrate \
+  --vmware-endpoint vmware.local \
+  --vmware-username username \
+  --vmware-password password \
+  --vmware-path /ha-datacenter/vm/migration-test \
+  --local-target-path /backup/vm-backups
+```
+
+For subsequent incremental backups:
+```bash
+migratekit migrate \
+  --vmware-endpoint vmware.local \
+  --vmware-username username \
+  --vmware-password password \
+  --vmware-path /ha-datacenter/vm/migration-test \
+  --local-target-path /backup/vm-backups
+```
+
+For cutover (final sync):
+```bash
+migratekit cutover \
+  --vmware-endpoint vmware.local \
+  --vmware-username username \
+  --vmware-password password \
+  --vmware-path /ha-datacenter/vm/migration-test \
+  --local-target-path /backup/vm-backups
+```
+
+#### Local Disk Output Structure:
+```
+/backup/vm-backups/
+└── migration-test/
+    ├── disk-2000.raw
+    ├── disk-2000.metadata.json
+    ├── disk-2001.raw
+    └── disk-2001.metadata.json
+```
+
+The metadata JSON files contain the change ID and other backup information for incremental backup tracking.
+
 ### Running Migratekit
 
 Assuming that you already have Docker installed on your system, you can use the
@@ -189,6 +243,7 @@ There are a few optional flags to define the following:
                  Valid values for the most OpenStack installations are "linux"
                  and "windows"
 -   `--enable-qemu-guest-agent`: Sets the "hw_qemu_guest_agent" volume (image) metadata parameter to "yes".
+-   `--local-target-path`: Local directory path for storing VM disks (alternative to OpenStack)
 
 ## Contributing
 
