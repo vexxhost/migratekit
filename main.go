@@ -6,7 +6,9 @@ import (
 	"net/url"
 	"os"
 	"time"
-
+	"fmt"
+	"golang.org/x/term"
+        "strings"
 	"github.com/erikgeiser/promptkit/confirmation"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	log "github.com/sirupsen/logrus"
@@ -81,6 +83,22 @@ var rootCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if debug {
 			log.SetLevel(log.DebugLevel)
+		}
+
+		if password == "" {
+		    if !term.IsTerminal(int(os.Stdin.Fd())) {
+		        return fmt.Errorf("password is required but terminal is not interactive; please provide --vmware-password flag")
+		    }
+		    fmt.Print("Enter VMware Password: ")
+		    
+		    // ReadPassword hides the user's typing for security
+		    bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
+		    if err != nil {
+		        fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+		        return err
+		    }
+		    password = strings.TrimSpace(string(bytePassword))
+		    fmt.Println() // Add a newline since ReadPassword doesn't print one
 		}
 
 		endpointUrl := &url.URL{
