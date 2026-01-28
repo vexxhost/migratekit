@@ -353,7 +353,6 @@ func init() {
 	rootCmd.MarkPersistentFlagRequired("vmware-username")
 
 	rootCmd.PersistentFlags().StringVar(&password, "vmware-password", "", "VMware password")
-	rootCmd.MarkPersistentFlagRequired("vmware-password")
 
 	rootCmd.PersistentFlags().StringVar(&path, "vmware-path", "", "VMware VM path (e.g. '/Datacenter/vm/VM')")
 	rootCmd.MarkPersistentFlagRequired("vmware-path")
