@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   image:
     runs-on: ubuntu-latest
@@ -14,19 +17,24 @@ jobs:
       attestations: write
       id-token: write
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - uses: step-security/setup-buildx-action@c60a792b446ef83310733d5cd9d0c8d6870d043f # v3.12.0
       - uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
         id: meta
         with:
           images: ghcr.io/vexxhost/migratekit
-      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+      - uses: step-security/docker-login-action@c3e677aae8393bc9c81cfdf9709648720ea4bd4d # v3.6.0
         if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+      - uses: step-security/docker-build-push-action@a8c3d08b23f8be6aeed43eb1a14ce6fe51284438 # v6.18.0
         with:
           context: .
           push: ${{ github.event_name == 'push' }}
