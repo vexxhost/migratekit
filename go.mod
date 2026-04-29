@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/erikgeiser/promptkit v0.9.0
 	github.com/google/uuid v1.6.0
-	github.com/gophercloud/gophercloud/v2 v2.8.0
+	github.com/gophercloud/gophercloud/v2 v2.12.0
 	github.com/gosimple/slug v1.15.0
 	github.com/k0kubun/go-ansi v0.0.0-20180517002512-3bf9e2903213
 	github.com/schollz/progressbar/v3 v3.18.0
@@ -38,7 +38,7 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/exp v0.0.0-20250103183323-7d7fa50e5329 // indirect
 	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.28.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 )
