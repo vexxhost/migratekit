@@ -21,9 +21,11 @@ import (
 )
 
 type OpenStack struct {
-	VirtualMachine *object.VirtualMachine
-	Disk           *types.VirtualDisk
-	ClientSet      *openstack.ClientSet
+	VirtualMachine       *object.VirtualMachine
+	Disk                 *types.VirtualDisk
+	ClientSet            *openstack.ClientSet
+	attachedInstanceUUID string
+	attachedVolumeID     string
 }
 
 type VolumeCreateOpts struct {
@@ -31,6 +33,26 @@ type VolumeCreateOpts struct {
 	VolumeType       string
 	BusType          string
 }
+
+var (
+	getVolumeForDisk = func(ctx context.Context, clientSet *openstack.ClientSet, vm *object.VirtualMachine, disk *types.VirtualDisk) (*volumes.Volume, error) {
+		return clientSet.GetVolumeForDisk(ctx, vm, disk)
+	}
+	getCurrentInstanceUUID = openstack.GetCurrentInstanceUUID
+	findVolumeDevice       = findDevice
+	attachVolume           = func(ctx context.Context, t *OpenStack, instanceUUID, volumeID string) error {
+		_, err := volumeattach.Create(ctx, t.ClientSet.Compute, instanceUUID, volumeattach.CreateOpts{
+			VolumeID: volumeID,
+		}).Extract()
+		return err
+	}
+	detachVolume = func(ctx context.Context, t *OpenStack, instanceUUID, volumeID string) error {
+		return volumeattach.Delete(ctx, t.ClientSet.Compute, instanceUUID, volumeID).ExtractErr()
+	}
+	waitVolumeStatus  = volumes.WaitForStatus
+	attachPollTimeout = 2 * time.Minute
+	attachPollEvery   = time.Second
+)
 
 func NewOpenStack(ctx context.Context, vm *object.VirtualMachine, disk *types.VirtualDisk) (*OpenStack, error) {
 	clientSet, err := openstack.NewClientSet(ctx)
@@ -70,7 +92,7 @@ func findDevice(volumeID string) (string, error) {
 }
 
 func (t *OpenStack) Connect(ctx context.Context) error {
-	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volume, err := getVolumeForDisk(ctx, t.ClientSet, t.VirtualMachine, t.Disk)
 	volumeMetadata := map[string]string{
 		"migrate_kit": "true",
 		"vm":          t.VirtualMachine.Reference().Value,
@@ -186,7 +208,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 	}
 
 	if path == "" {
-		instanceUUID, err := openstack.GetCurrentInstanceUUID()
+		instanceUUID, err := getCurrentInstanceUUID()
 		if err != nil {
 			return err
 		}
@@ -195,15 +217,14 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			"instance_uuid": instanceUUID,
 		}).Info("Detected instance UUID, attaching volume...")
 
-		_, err = volumeattach.Create(ctx, t.ClientSet.Compute, instanceUUID, volumeattach.CreateOpts{
-			VolumeID: volume.ID,
-		}).Extract()
-		if err != nil {
+		if err := attachVolume(ctx, t, instanceUUID, volume.ID); err != nil {
 			return err
 		}
+		t.attachedInstanceUUID = instanceUUID
+		t.attachedVolumeID = volume.ID
 
-		timeoutTimer := time.After(2 * time.Minute)
-		ticker := time.NewTicker(1 * time.Second)
+		timeoutTimer := time.After(attachPollTimeout)
+		ticker := time.NewTicker(attachPollEvery)
 		defer ticker.Stop()
 
 		for {
@@ -211,7 +232,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			case <-timeoutTimer:
 				return errors.New("timed out waiting for volume to attach")
 			case <-ticker.C:
-				devicePath, err := findDevice(volume.ID)
+				devicePath, err := findVolumeDevice(volume.ID)
 				if err != nil {
 					return err
 				}
@@ -260,12 +281,12 @@ func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, me
 }
 
 func (t *OpenStack) GetPath(ctx context.Context) (string, error) {
-	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volume, err := getVolumeForDisk(ctx, t.ClientSet, t.VirtualMachine, t.Disk)
 	if err != nil {
 		return "", err
 	}
 
-	devicePath, err := findDevice(volume.ID)
+	devicePath, err := findVolumeDevice(volume.ID)
 	if err != nil {
 		return "", err
 	}
@@ -274,33 +295,24 @@ func (t *OpenStack) GetPath(ctx context.Context) (string, error) {
 }
 
 func (t *OpenStack) Disconnect(ctx context.Context) error {
-	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volume, err := getVolumeForDisk(ctx, t.ClientSet, t.VirtualMachine, t.Disk)
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		return nil
 	} else if err != nil {
 		return err
 	}
 
-	devicePath, err := findDevice(volume.ID)
-	if err != nil {
-		return err
-	}
-
-	if devicePath != "" {
-		instanceUUID, err := openstack.GetCurrentInstanceUUID()
-		if err != nil {
+	if t.attachedVolumeID != "" {
+		if err := detachVolume(ctx, t, t.attachedInstanceUUID, t.attachedVolumeID); err != nil {
 			return err
 		}
-
-		err = volumeattach.Delete(ctx, t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr()
-		if err != nil {
-			return err
-		}
+		t.attachedInstanceUUID = ""
+		t.attachedVolumeID = ""
 
 		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 
-		err = volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
+		err = waitVolumeStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
 		if err != nil {
 			return errors.Join(errors.New("timed out waiting for volume to be available"), err)
 		}
