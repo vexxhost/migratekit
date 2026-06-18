@@ -65,7 +65,8 @@ var (
 	compressionMethod    CompressionMethodOpts = Skipz
 	flavorId             string
 	networkMapping       cmd.NetworkMappingFlag
-	availabilityZone     string
+	availabilityZone        string
+	volumeAvailabilityZone  string
 	volumeType           string
 	securityGroups       []string
 	enablev2v            bool
@@ -191,8 +192,12 @@ var rootCmd = &cobra.Command{
 		})
 
 		log.Info("Setting Disk Bus: ", BusTypeOptsIds[busType][0])
+		volumeAZ := volumeAvailabilityZone
+		if volumeAZ == "" {
+			volumeAZ = availabilityZone
+		}
 		v := target.VolumeCreateOpts{
-			AvailabilityZone: availabilityZone,
+			AvailabilityZone: volumeAZ,
 			VolumeType:       volumeType,
 			BusType:          BusTypeOptsIds[busType][0],
 		}
@@ -349,7 +354,9 @@ func init() {
 
 	rootCmd.PersistentFlags().Var(enumflag.New(&compressionMethod, "compression-method", CompressionMethodOptsIds, enumflag.EnumCaseInsensitive), "compression-method", "Specifies the compression method to use for the disk")
 
-	rootCmd.PersistentFlags().StringVar(&availabilityZone, "availability-zone", "", "Openstack availability zone for blockdevice & server")
+	rootCmd.PersistentFlags().StringVar(&availabilityZone, "availability-zone", "", "OpenStack availability zone for server (and volumes if --volume-availability-zone is not set)")
+
+	rootCmd.PersistentFlags().StringVar(&volumeAvailabilityZone, "volume-availability-zone", "", "OpenStack availability zone for volumes (overrides --availability-zone for volumes)")
 
 	rootCmd.PersistentFlags().StringVar(&volumeType, "volume-type", "", "Openstack volume type")
 
