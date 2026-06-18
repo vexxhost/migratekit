@@ -195,7 +195,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			"instance_uuid": instanceUUID,
 		}).Info("Detected instance UUID, attaching volume...")
 
-		_, err = volumeattach.Create(ctx, t.ClientSet.Compute, instanceUUID, volumeattach.CreateOpts{
+		_, err = volumeattach.Create(ctx, t.ClientSet.LocalCompute, instanceUUID, volumeattach.CreateOpts{
 			VolumeID: volume.ID,
 		}).Extract()
 		if err != nil {
@@ -292,7 +292,7 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 			return err
 		}
 
-		err = volumeattach.Delete(ctx, t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr()
+		err = volumeattach.Delete(ctx, t.ClientSet.LocalCompute, instanceUUID, volume.ID).ExtractErr()
 		if err != nil {
 			return err
 		}

@@ -27,6 +27,9 @@ type ClientSet struct {
 	BlockStorage *gophercloud.ServiceClient
 	Compute      *gophercloud.ServiceClient
 	Networking   *gophercloud.ServiceClient
+	// LocalCompute is scoped to the project running migratekit (no --project override).
+	// Used for volumeattach operations where the instance lives in the source project.
+	LocalCompute *gophercloud.ServiceClient
 }
 
 type PortCreateOpts struct {
@@ -39,7 +42,28 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 		return nil, err
 	}
 
-	if project, _ := ctx.Value("osProject").(string); project != "" {
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if os.Getenv("OS_INSECURE") == "true" {
+		tlsConfig.InsecureSkipVerify = true
+	}
+
+	newProvider := func(authOpts gophercloud.AuthOptions) (*gophercloud.ProviderClient, error) {
+		p, err := openstack.NewClient(authOpts.IdentityEndpoint)
+		if err != nil {
+			return nil, err
+		}
+		ua := gophercloud.UserAgent{}
+		ua.Prepend("migratekit")
+		p.UserAgent = ua
+		p.HTTPClient.Transport = &http.Transport{TLSClientConfig: tlsConfig}
+		if err := openstack.Authenticate(ctx, p, authOpts); err != nil {
+			return nil, err
+		}
+		return p, nil
+	}
+
+	project, _ := ctx.Value("osProject").(string)
+	if project != "" {
 		if isUUID(project) {
 			opts.TenantID = project
 			opts.TenantName = ""
@@ -49,57 +73,51 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 		}
 	}
 
-	provider, err := openstack.NewClient(opts.IdentityEndpoint)
+	provider, err := newProvider(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	ua := gophercloud.UserAgent{}
-	ua.Prepend("migratekit")
-	provider.UserAgent = ua
+	region := os.Getenv("OS_REGION_NAME")
 
-	config := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-	}
-
-	if os.Getenv("OS_INSECURE") == "true" {
-		config.InsecureSkipVerify = true
-	}
-
-	provider.HTTPClient.Transport = &http.Transport{
-		TLSClientConfig: config,
-	}
-
-	err = openstack.Authenticate(ctx, provider, opts)
+	blockStorageClient, err := openstack.NewBlockStorageV3(provider, gophercloud.EndpointOpts{Region: region})
 	if err != nil {
 		return nil, err
 	}
 
-	blockStorageClient, err := openstack.NewBlockStorageV3(provider, gophercloud.EndpointOpts{
-		Region: os.Getenv("OS_REGION_NAME"),
-	})
+	computeClient, err := openstack.NewComputeV2(provider, gophercloud.EndpointOpts{Region: region})
 	if err != nil {
 		return nil, err
 	}
 
-	computeClient, err := openstack.NewComputeV2(provider, gophercloud.EndpointOpts{
-		Region: os.Getenv("OS_REGION_NAME"),
-	})
+	networkingClient, err := openstack.NewNetworkV2(provider, gophercloud.EndpointOpts{Region: region})
 	if err != nil {
 		return nil, err
 	}
 
-	networkingClient, err := openstack.NewNetworkV2(provider, gophercloud.EndpointOpts{
-		Region: os.Getenv("OS_REGION_NAME"),
-	})
-	if err != nil {
-		return nil, err
+	// When --project overrides the scope, volumeattach calls must use the source project
+	// (where the migratekit instance lives). Create a separate compute client for that.
+	localComputeClient := computeClient
+	if project != "" {
+		localOpts, err := openstack.AuthOptionsFromEnv()
+		if err != nil {
+			return nil, err
+		}
+		localProvider, err := newProvider(localOpts)
+		if err != nil {
+			return nil, err
+		}
+		localComputeClient, err = openstack.NewComputeV2(localProvider, gophercloud.EndpointOpts{Region: region})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &ClientSet{
 		BlockStorage: blockStorageClient,
 		Compute:      computeClient,
 		Networking:   networkingClient,
+		LocalCompute: localComputeClient,
 	}, nil
 }
 
