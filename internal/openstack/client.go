@@ -39,6 +39,16 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 		return nil, err
 	}
 
+	if project, _ := ctx.Value("osProject").(string); project != "" {
+		if isUUID(project) {
+			opts.TenantID = project
+			opts.TenantName = ""
+		} else {
+			opts.TenantName = project
+			opts.TenantID = ""
+		}
+	}
+
 	provider, err := openstack.NewClient(opts.IdentityEndpoint)
 	if err != nil {
 		return nil, err
@@ -293,4 +303,20 @@ func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *ob
 	}
 
 	return nil
+}
+
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }

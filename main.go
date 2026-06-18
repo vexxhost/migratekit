@@ -74,6 +74,7 @@ var (
 	osType               string
 	enableQemuGuestAgent bool
 	noCBT                bool
+	osProject            string
 )
 
 var rootCmd = &cobra.Command{
@@ -202,6 +203,8 @@ var rootCmd = &cobra.Command{
 		ctx = context.WithValue(ctx, "osType", osType)
 
 		ctx = context.WithValue(ctx, "enableQemuGuestAgent", enableQemuGuestAgent)
+
+		ctx = context.WithValue(ctx, "osProject", osProject)
 
 		cmd.SetContext(ctx)
 
@@ -359,6 +362,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
 
 	rootCmd.PersistentFlags().BoolVar(&noCBT, "no-cbt", false, "Disable Changed Block Tracking requirement; migrations always perform a full copy")
+
+	rootCmd.PersistentFlags().StringVar(&osProject, "project", "", "OpenStack project name or ID to migrate into (overrides OS_PROJECT_NAME/OS_PROJECT_ID)")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")
