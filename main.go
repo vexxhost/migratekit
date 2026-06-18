@@ -72,7 +72,8 @@ var (
 	busType              BusTypeOpts
 	vzUnsafeVolumeByName bool
 	osType               string
-    enableQemuGuestAgent bool
+	enableQemuGuestAgent bool
+	noCBT                bool
 )
 
 var rootCmd = &cobra.Command{
@@ -154,7 +155,10 @@ var rootCmd = &cobra.Command{
 		}
 
 		if o.Config.ChangeTrackingEnabled == nil || !*o.Config.ChangeTrackingEnabled {
-			return errors.New("change tracking is not enabled on the virtual machine")
+			if !noCBT {
+				return errors.New("change tracking is not enabled on the virtual machine")
+			}
+			log.Warning("Change tracking is not enabled, --no-cbt set: migrations will always do a full copy")
 		}
 
 		if snapshotRef, _ := vm.FindSnapshot(ctx, "migratekit"); snapshotRef != nil {
@@ -352,7 +356,9 @@ func init() {
 
     rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
 
-    rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
+	rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
+
+	rootCmd.PersistentFlags().BoolVar(&noCBT, "no-cbt", false, "Disable Changed Block Tracking requirement; migrations always perform a full copy")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")

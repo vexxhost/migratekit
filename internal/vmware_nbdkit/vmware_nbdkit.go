@@ -2,6 +2,7 @@ package vmware_nbdkit
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"os"
 	"os/exec"
@@ -311,7 +312,10 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V bool) error {
 	snapshotChangeId, err := vmware.GetChangeID(s.Disk)
 	if err != nil {
-		return err
+		if !errors.Is(err, vmware.ErrCBTNotEnabled) {
+			return err
+		}
+		snapshotChangeId = &vmware.ChangeID{}
 	}
 
 	needFullCopy, targetIsClean, err := target.NeedsFullCopy(ctx, t)
