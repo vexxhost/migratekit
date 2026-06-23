@@ -76,6 +76,7 @@ var (
 	enableQemuGuestAgent bool
 	noCBT                bool
 	osProject            string
+	fixNicNames          bool
 )
 
 var rootCmd = &cobra.Command{
@@ -210,6 +211,8 @@ var rootCmd = &cobra.Command{
 		ctx = context.WithValue(ctx, "enableQemuGuestAgent", enableQemuGuestAgent)
 
 		ctx = context.WithValue(ctx, "osProject", osProject)
+
+		ctx = context.WithValue(ctx, "fixNicNames", fixNicNames)
 
 		cmd.SetContext(ctx)
 
@@ -381,6 +384,8 @@ func init() {
 	cutoverCmd.Flags().StringSliceVar(&securityGroups, "security-groups", nil, "Openstack security groups, comma separated (e.g. '42c5a89e-4034-4f2a-adea-b33adc9614f4,6647122c-2d46-42f1-bb26-f38007730fdc')")
 
 	cutoverCmd.Flags().BoolVar(&enablev2v, "run-v2v", true, "Run virt2v-inplace on destination VM")
+
+	cutoverCmd.Flags().BoolVar(&fixNicNames, "fix-nic-names", false, "Inject udev rules into the guest to preserve VMware interface names (e.g. ens192) in OpenStack")
 
 	cutoverCmd.Flags().StringVar(&availabilityZone, "availability-zone", "", "OpenStack availability zone for blockdevice & server")
 	cutoverCmd.MarkFlagRequired("availability-zone")
