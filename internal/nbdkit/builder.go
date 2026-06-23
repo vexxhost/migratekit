@@ -96,8 +96,8 @@ func (b *NbdkitBuilder) Build() (*NbdkitServer, error) {
 		fmt.Sprintf("snapshot=%s", b.snapshot),
 		"transports=file:nbdssl:nbd",
 		b.filename,
-		cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH=/usr/lib64/vmware-vix-disklib/lib64"),
 	)
+	cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH=/usr/lib64/vmware-vix-disklib/lib64")
 
 	return &NbdkitServer{
 		cmd:     cmd,
