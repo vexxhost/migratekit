@@ -7,25 +7,24 @@ is copied by `internal/vmware_nbdkit.NbdkitServers.MigrationCycle`, and the next
 disk is not processed until `NbdkitServer.SyncToTarget` returns for the current
 disk.
 
-The most likely bug area is OpenStack volume detach handling plus timeout/error
-propagation, not VMware copy sequencing. The code attaches each target Cinder
-volume to the current OpenStack instance, copies data through the local block
-device, and then calls `OpenStack.Disconnect` through a deferred call. That
-detach path:
+The log-backed root cause is most likely an OpenStack attachment-state race, not
+VMware disk sequencing. The successful and failing paths both attach a target
+Cinder volume, wait for a local `/dev/disk/by-id` path, copy data, and call
+`OpenStack.Disconnect`. The first divergence happens when
+`volumeattach.Delete` is called:
 
-- re-discovers the volume and local device instead of tracking the attachment
-  returned by `volumeattach.Create`,
-- calls Nova detach using `volume.ID`,
-- waits only for the Cinder volume status to become `available`,
-- does not confirm the Nova attachment is gone,
-- does not confirm the local `/dev/disk/by-id` entry disappeared,
-- uses a fixed 60 second detach wait, and
-- has its normal deferred error ignored by `SyncToTarget`.
+- successful path: Nova accepts the detach request, then
+  `waitForVolumeDetached` polls until Cinder status, attachment count, and local
+  device state indicate detach completion;
+- failing path: Nova rejects the detach request before polling starts because
+  the volume is not yet in the `in-use` / attached state required for detach.
 
-Those behaviors match a failure mode where the first disk copy finishes, detach
-is slow or incomplete, the process blocks for the short wait, may silently move
-on after a detach error, and later disk attachment or final server creation needs
-manual cleanup.
+The strongest explanation is that `OpenStack.Connect` treats local device
+appearance as sufficient attach readiness. That proves the worker OS sees the
+block device, but it does not prove the Nova/Cinder control plane has finished
+transitioning the volume attachment to attached. If the subsequent copy is very
+fast, `Disconnect` can attempt detach while OpenStack still reports the volume as
+not detachable.
 
 ## Reproduction Scenario
 
@@ -71,8 +70,21 @@ The user-reported behavior is:
 - Detach confirmation can time out.
 - Moving on to the next drive can require manual intervention.
 
+The provided logs show two forms of the same behavior:
+
+- In the 2-disk run, the first disk reaches detach immediately after a fast
+  incremental copy. Nova rejects the DELETE before detach polling starts.
+- In the 7-disk run, the first two disks detach successfully because their copy
+  windows are long enough for attachment state to settle. The third disk copies
+  almost instantly and fails at the same DELETE call.
+
+The 7-disk log is therefore a source of successful detach examples, not a fully
+successful end-to-end migration log.
+
 This investigation did not reproduce the behavior live. Findings are based on
-static code inspection.
+static code inspection plus the provided debug logs. The debug logs contain
+sensitive command-line data, so this document references line numbers and state
+transitions without quoting full command lines.
 
 ## Relevant Files / Functions
 
@@ -82,32 +94,34 @@ static code inspection.
     down the source VM, starts a final `MigrationCycle`, then creates the Nova
     server.
 - `internal/vmware_nbdkit/vmware_nbdkit.go`
-  - `NbdkitServers.Start` at lines 76-135 creates one VMware snapshot and starts
+  - `NbdkitServers.Start` creates one VMware snapshot and starts
     one `nbdkit` server per VMware disk.
-  - `NbdkitServers.MigrationCycle` at lines 175-203 loops over
+  - `NbdkitServers.MigrationCycle` loops over
     `s.Servers` and calls `server.SyncToTarget` for each disk.
-  - `NbdkitServer.FullCopyToTarget` at lines 206-227 runs `nbdcopy`.
-  - `NbdkitServer.IncrementalCopyToTarget` at lines 229-308 reads changed
+  - `NbdkitServer.FullCopyToTarget` runs `nbdcopy`.
+  - `NbdkitServer.IncrementalCopyToTarget` reads changed
     regions through libnbd and writes to the target block device.
-  - `NbdkitServer.SyncToTarget` at lines 311-390 connects the target, copies,
+  - `NbdkitServer.SyncToTarget` connects the target, copies,
     optionally runs `virt-v2v-in-place`, writes change ID metadata, and defers
     target disconnect.
 - `internal/target/openstack.go`
-  - `OpenStack.Connect` at lines 72-235 creates/attaches the target Cinder
-    volume and waits for a local device.
-  - `OpenStack.GetPath` at lines 262-274 maps a volume ID to a local device path.
-  - `OpenStack.Disconnect` at lines 276-310 detaches the target volume and waits
-    for Cinder `available`.
-  - `findDevice` at lines 52-70 searches `/dev/disk/by-id` for the first 18
+  - `OpenStack.Connect` creates/attaches the target Cinder volume and waits for
+    a local device.
+  - `OpenStack.GetPath` maps a volume ID to a local device path.
+  - `OpenStack.Disconnect` detaches the target volume and calls
+    `waitForVolumeDetached`.
+  - `waitForVolumeDetached` polls Cinder status, Cinder attachment count, and
+    local device visibility.
+  - `findDevice` searches `/dev/disk/by-id` for the first 18
     characters of the volume ID.
 - `internal/openstack/client.go`
-  - `ClientSet.GetVolumeForDisk` at lines 96-140 finds the migrated Cinder
-    volume for a VMware disk.
-  - `ClientSet.CreateResourcesForVirtualMachine` at lines 245-296 creates the
-    final Nova server from all migrated volumes after final cutover sync.
+  - `ClientSet.GetVolumeForDisk` finds the migrated Cinder volume for a VMware
+    disk.
+  - `ClientSet.CreateResourcesForVirtualMachine` creates the final Nova server
+    from all migrated volumes after final cutover sync.
 - `internal/openstack/util.go`
-  - `GetCurrentInstanceUUID` at lines 18-42 reads the migration worker UUID from
-    the OpenStack metadata service.
+  - `GetCurrentInstanceUUID` reads the migration worker UUID from the OpenStack
+    metadata service.
 
 ## Execution Flow
 
@@ -176,7 +190,9 @@ symlink.
    two minutes pass.
 
 The returned Nova volume attachment from `volumeattach.Create(...).Extract()` is
-discarded.
+discarded. The attach wait does not poll Cinder volume status, Cinder attachment
+count, or Nova's server volume-attachment list before returning to the copy
+path.
 
 ### OpenStack Volume Detach
 
@@ -184,14 +200,18 @@ discarded.
 
 1. Re-finds the Cinder volume with `GetVolumeForDisk`.
 2. Calls `findDevice(volume.ID)`.
-3. If `findDevice` returns an empty string, returns nil without issuing a Nova
-   detach request.
-4. If a device path exists, gets the current migration worker UUID.
-5. Calls `volumeattach.Delete(ctx, computeClient, instanceUUID, volume.ID)`.
-6. Waits up to 60 seconds for the Cinder volume status to become `available`.
+3. If Cinder already reports `available`, has zero attachments, and the local
+   device is absent, returns success.
+4. If Cinder already reports `available` with zero attachments but the local
+   device is still present, waits for the local device to disappear.
+5. Otherwise, gets the current migration worker UUID.
+6. Calls `volumeattach.Delete(ctx, computeClient, instanceUUID, volume.ID)`.
+7. Waits up to five minutes for Cinder status `available`, zero Cinder
+   attachments, and no local `/dev/disk/by-id` match.
 
-There is no Nova attachment-list check, no explicit attachment ID tracking, and
-no wait for local device removal.
+There is no Nova attachment-list check before issuing DELETE and no explicit
+attachment ID tracking. If Nova rejects the DELETE, the post-DELETE detach wait
+never starts.
 
 ### Other Cleanup
 
@@ -209,180 +229,315 @@ no wait for local device removal.
 
 ## How Detach Completion Is Confirmed
 
-Detach completion is confirmed only by:
+After Nova accepts a detach DELETE, detach completion is confirmed by
+`waitForVolumeDetached`:
 
 ```go
-ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-defer cancel()
-
-err = volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
+volumeDetachComplete(status, attachmentCount, devicePath)
 ```
 
-This is Cinder status confirmation only. The code does not confirm:
+That requires:
 
-- the Nova volume attachment was removed,
-- the attachment ID used for deletion was the actual attachment ID returned by
-  Nova,
-- the volume has no remaining attachments,
-- `/dev/disk/by-id` no longer contains the local device entry, or
-- the kernel has finished releasing the block device.
+- Cinder status `available`,
+- Cinder attachment count `0`, and
+- no local `/dev/disk/by-id` path for the target volume.
+
+The code still does not confirm attach readiness symmetrically before copy. In
+the failing logs, the error occurs before `waitForVolumeDetached` starts, so
+post-DELETE polling cannot protect against a premature DELETE request.
 
 ## Timeout / Retry Behavior
 
 - New volume creation waits 60 seconds for Cinder `available`.
 - Volume attach waits two minutes for `findDevice(volume.ID)` to return a local
   path.
-- Volume detach waits 60 seconds for Cinder `available`.
+- Volume detach waits five minutes after Nova accepts DELETE.
 - There is no retry around `volumeattach.Delete`.
 - There is no retry around a detach wait timeout.
 - There is no backoff or longer cloud-configurable timeout.
 - `GetCurrentInstanceUUID` uses `http.Client{}` with no explicit timeout.
 - The normal deferred `t.Disconnect(ctx)` return value in `SyncToTarget` is
-  ignored.
+  propagated by the current code, so detach failures stop the migration cycle.
 
-Because `defer t.Disconnect(ctx)` ignores the returned error, a detach timeout
-can delay the current disk by 60 seconds and then be silently discarded if the
-copy path itself succeeded.
+Because there is no retry around `volumeattach.Delete`, a transient
+not-yet-attached OpenStack state becomes a hard migration failure even if the
+volume would become detachable seconds later.
 
-## Suspected Root Cause
+## Root Cause Analysis
 
-Most likely category: **OpenStack volume detach handling** plus
-**timeout/retry logic**.
+### Line-by-Line Path Comparison
 
-Contributing category: **per-disk state tracking**.
+The logs share the same execution path until the first Nova detach DELETE after
+a disk copy.
 
-Less likely categories:
+Successful detach path, from the 7-disk log:
 
-- **Migration loop sequencing**: the loop is sequential and waits for
-  `SyncToTarget` to return before starting the next disk.
-- **virt-v2v helper cleanup**: `migrate` does not run `virt-v2v-in-place`, and
-  cutover runs it only on disk index `0` after the copy command returns.
-  `virt-v2v` may increase detach latency for the first final-cutover disk, but
-  it is not required to explain the same issue during `migrate`.
+1. Disk `2000` attaches volume `9c2ca...`.
+2. `OpenStack.Connect` reports a local device at `/dev/vdf`.
+3. Incremental copy starts and completes.
+4. `SyncToTarget` begins deferred disconnect for disk `2000`.
+5. `OpenStack.Disconnect` logs `Detaching volume`.
+6. Nova accepts `volumeattach.Delete`.
+7. `waitForVolumeDetached` logs `Waiting for volume detach to complete`.
+8. Polling observes `status=detaching`, `attachments=1`, and `device=/dev/vdf`.
+9. Polling completes and logs `Volume detach completed`.
+10. `SyncToTarget` logs `Target disk disconnected`.
+11. `MigrationCycle` moves to the next disk.
 
-The strongest code-backed hypothesis is:
+Failing detach path, from the 2-disk log:
 
-1. The code does not track the attachment created for a disk.
-2. Detach uses `volume.ID` and current instance UUID, not a stored attachment
-   object.
-3. Detach confirmation waits only for Cinder `available`, for only 60 seconds.
-4. Detach errors are ignored by the defer in the normal copy path.
-5. Multi-disk migration depends on each disk being cleanly detached before the
-   next disk can safely attach and copy.
+1. Disk `2000` attaches volume `1acd...`.
+2. `OpenStack.Connect` reports a local device at `/dev/vdf`.
+3. Incremental copy starts and completes very quickly.
+4. `SyncToTarget` begins deferred disconnect for disk `2000`.
+5. `OpenStack.Disconnect` logs `Detaching volume`.
+6. Nova rejects `volumeattach.Delete` with HTTP 400 before
+   `waitForVolumeDetached` starts.
+7. `SyncToTarget` logs `Failed to disconnect target disk`.
+8. `MigrationCycle` returns the error and the snapshot cleanup runs.
 
-That combination can leave the migration worker with a still-attached or
-still-detaching first disk while the process moves to the next disk or reaches
-final server creation.
+The 7-disk log later repeats the same failing path on disk `2017`: attach local
+device, very fast copy, `Detaching volume`, immediate HTTP 400 from Nova, and no
+`Waiting for volume detach to complete` line.
 
-## Evidence From The Code
+### Exact Divergence Point
 
-- Multi-disk processing is serial:
-  `internal/vmware_nbdkit/vmware_nbdkit.go:187-200` loops over `s.Servers` and
-  calls `server.SyncToTarget`.
-- The target disconnect is deferred and its error is ignored:
-  `internal/vmware_nbdkit/vmware_nbdkit.go:322-326`.
-- The signal-handler disconnect path logs fatal on disconnect errors, but the
-  normal deferred path does not inspect or log the error:
-  `internal/vmware_nbdkit/vmware_nbdkit.go:328-340`.
-- Attach discards the returned attachment:
-  `internal/target/openstack.go:198-200` calls `volumeattach.Create(...).Extract()`
-  and assigns only to `_`.
-- Detach re-discovers the volume and local path:
-  `internal/target/openstack.go:276-284`.
-- Detach is skipped entirely if `findDevice` does not find a local path:
-  `internal/target/openstack.go:284-289`.
-- Detach calls Nova with `volume.ID`:
-  `internal/target/openstack.go:295`.
-- Detach completion waits only for Cinder `available`:
-  `internal/target/openstack.go:300-305`.
-- Local device discovery uses a partial volume-ID substring:
-  `internal/target/openstack.go:52-70`.
-- Final cutover server creation assumes all prior disk detach work completed:
-  `main.go:309-317` runs the final migration cycle and then calls
-  `CreateResourcesForVirtualMachine`.
-- `CreateResourcesForVirtualMachine` attaches all migrated volumes as boot
-  block devices for the destination server:
-  `internal/openstack/client.go:257-282`.
+The exact divergence is the return from:
 
-## Risks
+```go
+volumeattach.Delete(ctx, t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr()
+```
 
-- A detach timeout can be hidden because the normal defer ignores
-  `Disconnect` errors.
-- Hidden detach failures can leave volumes attached to the migration worker.
-- A later disk attach may fail or stall if the migration worker or cloud is
-  still processing the prior detach.
-- Final Nova server creation can fail if migrated volumes remain attached to the
-  migration worker after final cutover sync.
-- Re-discovering by local device path can skip detach when the Nova/Cinder
-  attachment still exists but the local `/dev/disk/by-id` entry is missing.
-- Waiting only for Cinder `available` may not be enough to prove local device
-  cleanup is complete.
-- A hard-coded 60 second detach timeout may be too short for some OpenStack
-  backends, multipath configurations, or large/slow volumes.
-- If `volumeattach.Delete` requires an attachment ID that differs from
-  `volume.ID` in a target cloud, the code has no fallback because it discards
-  the attachment returned by `Create`.
+in `internal/target.OpenStack.Disconnect`.
 
-## Smallest Safe Fix Proposal
+In successful detach attempts, this call returns nil and execution continues
+into `waitForVolumeDetached`. In failing attempts, this call returns the Nova
+HTTP 400 error and the wait loop never starts.
 
-Do not refactor unrelated migration logic. Keep the per-disk serial model, but
-make OpenStack detach explicit, observable, and blocking.
+### Responsible Functions
 
-Suggested minimal change set:
+- `internal/vmware_nbdkit.NbdkitServers.MigrationCycle` controls per-disk
+  sequencing. It is serial: the next disk starts only after
+  `SyncToTarget` returns.
+- `internal/vmware_nbdkit.NbdkitServer.SyncToTarget` calls `t.Connect`, runs
+  the copy, and defers `t.Disconnect`.
+- `internal/target.OpenStack.Connect` creates the Nova volume attachment and
+  waits only for local device discovery before returning.
+- `internal/target.OpenStack.Disconnect` issues the Nova detach DELETE.
+- `internal/target.OpenStack.waitForVolumeDetached` confirms detach only after
+  Nova accepts DELETE.
 
-1. Preserve disconnect errors from `SyncToTarget`.
-   - Use a named return error or explicit cleanup block so
-     `t.Disconnect(ctx)` errors are returned when the copy itself succeeded.
-   - Log the volume ID, disk key, local path, and detach failure.
-2. Track or resolve the real Nova attachment.
-   - Store the attachment returned by `volumeattach.Create`, or list current
-     server volume attachments and find the one matching `volume.ID`.
-   - Use the correct attachment identifier for `volumeattach.Delete`.
-3. Confirm detach through more than Cinder status.
-   - Wait until the Nova attachment is gone.
-   - Wait until Cinder reports `available`.
-   - Wait until `findDevice(volume.ID)` no longer returns a local device.
-4. Extend or configure detach timeout.
-   - A 60 second fixed timeout is likely too tight for real clouds.
-   - Use a longer default such as five minutes, or add a flag/config value.
-5. Keep the next disk blocked until detach confirmation succeeds.
-   - If detach cannot be confirmed, return an error instead of silently moving
-     to the next disk.
+### Why One Path Continues And The Other Fails
 
-The very first code change should probably be preserving and returning
-`Disconnect` errors. That makes the failure visible without changing the copy
-algorithm.
+The successful 7-disk detach attempts have enough elapsed time between local
+device discovery and detach for OpenStack to finish attachment state
+transitions. Nova accepts DELETE, so detach polling can begin and complete.
 
-## Tests That Should Be Added
+The failing attempts have a much shorter copy window. The local block device is
+visible, so `Connect` returns and copy begins, but the OpenStack control plane
+does not yet consider the volume fully `in-use` / attached by the time
+`Disconnect` sends DELETE. Nova refuses the detach because its state validation
+requires the volume to be attached before it can be detached.
 
-Unit-level tests, likely requiring small interfaces or fakes around the target:
+This makes the failure timing-sensitive: larger or slower copies naturally hide
+the race, while fast incremental copies expose it.
 
+## Evidence
+
+Log evidence:
+
+- 2-disk log:
+  - line 10: local device found for the first volume;
+  - line 11: first disk copy starts;
+  - line 13: disconnect begins for disk `2000`;
+  - line 14: detach DELETE is attempted;
+  - line 15: Nova rejects DELETE with HTTP 400 because volume status /
+    attach-status is not detachable;
+  - no `Waiting for volume detach to complete` line appears.
+- 7-disk log, successful disk `2000`:
+  - line 19: detach DELETE is attempted;
+  - line 20: wait loop starts, proving DELETE was accepted;
+  - lines 21-22: polling sees in-progress detach state;
+  - line 23: detach completion is confirmed;
+  - line 25: the next disk begins.
+- 7-disk log, successful disk `2001`:
+  - line 34: detach DELETE is attempted;
+  - line 35: wait loop starts;
+  - line 38: detach completion is confirmed.
+- 7-disk log, failing disk `2017`:
+  - line 45: local device found;
+  - line 47: copy is effectively immediate;
+  - line 49: detach DELETE is attempted;
+  - line 50: Nova rejects DELETE with the same HTTP 400;
+  - no wait-loop line appears.
+
+Code evidence:
+
+- `OpenStack.Connect` waits for `findDevice(volume.ID)` to return a device path,
+  but does not wait for Cinder volume status `in-use`, Cinder attachments, or
+  Nova server volume attachments to show the attachment as complete.
+- `OpenStack.Connect` discards the attachment object returned by
+  `volumeattach.Create`.
+- `OpenStack.Disconnect` refetches the Cinder volume once before DELETE, but it
+  does not wait for attach-ready state before attempting DELETE.
+- `waitForVolumeDetached` is reached only after Nova accepts DELETE, so it
+  cannot handle the pre-DELETE race shown in the failing logs.
+- `MigrationCycle` and `SyncToTarget` preserve serial per-disk sequencing; the
+  logs show the process is not concurrently processing the next disk before the
+  current disk's disconnect finishes or fails.
+
+## Confidence Levels
+
+Ranked suspected causes:
+
+1. **Attachment/volume state handling: High**
+   - `Connect` treats local device discovery as attach completion.
+   - Nova's error says the volume is not in the attached state required for
+     detach.
+   - Successful cases have longer copy windows before detach.
+2. **Race condition / asynchronous OpenStack behavior: High**
+   - The same code succeeds when more time passes and fails when copy completes
+     almost immediately.
+   - Local device discovery and control-plane attachment state are not the same
+     readiness signal.
+3. **Timeout/retry logic: Medium**
+   - There is no retry or wait around a detach DELETE rejected because the
+     volume is not yet detachable.
+   - A small bounded retry around this specific state transition could mask the
+     race, but attach readiness should be fixed first.
+4. **Stale attachment IDs: Medium-Low**
+   - The code discards the `volumeattach.Create` result and uses `volume.ID` for
+     DELETE.
+   - However, successful detaches use the same DELETE shape, so this is not the
+     best explanation for the observed divergence.
+5. **Incorrect polling logic: Low for this failure**
+   - The failing path never reaches `waitForVolumeDetached`.
+   - Polling may still need more observability, but it is not the first
+     divergence.
+6. **Per-disk state tracking: Low**
+   - Disk keys and volume IDs differ correctly in the logs.
+   - The sequence is serial and volume lookup appears per-disk.
+7. **Migration loop sequencing: Low**
+   - `MigrationCycle` waits for `SyncToTarget` to return before moving to the
+     next disk.
+8. **virt-v2v cleanup: Low**
+   - The failing logs are `migrate` runs, not final cutover `virt-v2v` paths.
+
+## Proposed Fix
+
+Smallest safe change: make `OpenStack.Connect` wait for OpenStack attach
+readiness before returning to the copy path.
+
+Specifically, after `volumeattach.Create` and local device discovery, keep
+polling the exact Cinder volume until it reports an attached state compatible
+with a future detach:
+
+- Cinder volume status is `in-use`;
+- Cinder attachment count is greater than zero;
+- one attachment matches the current migration worker instance UUID when that
+  field is available;
+- the local device path for the same volume is present.
+
+For the already-attached path where `GetPath` returns a device before
+`volumeattach.Create` is called, run the same readiness check before returning.
+
+Keep the current post-DELETE `waitForVolumeDetached` behavior. It is useful once
+Nova accepts DELETE; the missing piece is the pre-copy / pre-detach attach
+readiness gate.
+
+Optional but still small follow-up: when `volumeattach.Delete` returns the
+specific OpenStack "not attached / not in-use" 400, refetch the volume state and
+log it. Retrying DELETE should be considered only if the retry condition is
+tightly scoped and does not hide unrelated OpenStack failures.
+
+## Regression Risks
+
+- The migration may wait longer before copying each disk, especially on clouds
+  where Cinder/Nova state transitions lag behind local device creation.
+- Some OpenStack backends may expose attachment details differently in the
+  Gophercloud `volumes.Volume.Attachments` structure. The readiness check should
+  be conservative: if instance matching is unavailable, require at least
+  `status=in-use`, attachment count greater than zero, and local device present.
+- Existing already-attached/stale local device cases may now fail or wait
+  instead of proceeding. That is safer for correctness, but it may expose
+  cleanup problems that were previously hidden.
+- If a backend reports a nonstandard status while the device is genuinely usable,
+  the new wait could time out. Logging the observed status and attachments will
+  be important for tuning.
+- Retrying DELETE too broadly would be risky because real OpenStack errors must
+  not be masked as success.
+
+## Recommended Tests
+
+Unit-level tests:
+
+- Attach readiness helper test:
+  - returns false for `available` with zero attachments even when a local device
+    exists;
+  - returns true for `in-use` with an attachment and matching local device;
+  - returns false for `in-use` without a local device.
+- `Connect` wait test:
+  - simulate local device appearing before Cinder status becomes `in-use`;
+    assert `Connect` does not return until both are true.
+- `Connect` timeout test:
+  - simulate local device present but Cinder never leaving `available`; assert a
+    useful timeout error.
+- DELETE rejection diagnostic test:
+  - simulate `volumeattach.Delete` returning the specific HTTP 400 and assert
+    the error is returned and state logging/refetch is attempted if implemented.
 - Multi-disk sequencing test:
-  - Disk 1 `Connect`, copy, `Disconnect` must complete before disk 2 `Connect`.
-- Disconnect error propagation test:
-  - If copy succeeds but `Disconnect` fails, `SyncToTarget` should return the
-    disconnect error.
-- Disconnect wait test:
-  - `Disconnect` should not return success until attachment gone, Cinder status
-    available, and local device path gone.
-- Detach timeout test:
-  - Simulate a volume that never reaches available or whose attachment remains;
-    assert the error is returned and logged.
-- Already-detached/local-missing test:
-  - If local device path is missing but Nova/Cinder still show attachment,
-    `Disconnect` should still detach or report the inconsistency.
-- Multi-disk cutover test:
-  - Final server creation should not be attempted until every migrated volume
-    has been detached from the migration worker.
-- `virt-v2v` final-cycle test:
-  - When `runV2V=true`, disk index `0` runs conversion and still performs the
-    same detach confirmation before disk index `1`.
+  - disk 2 `Connect` must not start until disk 1 `Disconnect` has completed or
+    returned an error.
+- Existing detach wait tests:
+  - keep coverage that `Disconnect` waits until Cinder status is `available`,
+    attachment count is zero, and local device path is gone.
 
 Integration/manual tests:
 
-- OpenStack integration test with a source VM containing at least two disks and
-  migrated target Cinder volumes.
-- Slow-detach simulation or backend where detach commonly exceeds 60 seconds.
+- Run a multi-disk incremental migration where at least one disk has no changed
+  blocks or an extremely small changed set.
+- Confirm logs show attach readiness before copy starts.
+- Confirm fast-copy disks detach successfully without requiring manual delay.
+- Repeat with a slow OpenStack backend and verify attach and detach timeout
+  errors include volume status, attachment count, instance UUID, volume ID, disk
+  key, and local device path.
+
+## Additional Logging To Validate The Fix
+
+Add structured debug/info logging around these points:
+
+- Immediately after `volumeattach.Create`:
+  - disk key,
+  - volume ID,
+  - current migration worker instance UUID,
+  - returned attachment ID if available,
+  - returned device name if available.
+- During attach readiness polling:
+  - Cinder volume status,
+  - Cinder attachment count,
+  - attachment server IDs if exposed,
+  - local device path,
+  - elapsed wait time.
+- Immediately before copy starts:
+  - explicit "volume attach ready" log with disk key, volume ID, status,
+    attachment count, and local path.
+- Immediately before `volumeattach.Delete`:
+  - disk key,
+  - volume ID,
+  - current Cinder status,
+  - attachment count,
+  - local device path.
+- When `volumeattach.Delete` fails:
+  - original Nova error,
+  - refetched Cinder status and attachments,
+  - local device path.
+- During detach polling:
+  - keep the existing status, attachment count, and local device fields.
+  - add elapsed wait time if possible.
+
+Avoid logging VMware or OpenStack credentials. The provided debug logs include a
+password in the nbdkit command line, so future debug logging should redact
+secrets before printing external commands.
 
 ## Manual Validation Steps
 
