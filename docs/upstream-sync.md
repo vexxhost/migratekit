@@ -5,9 +5,9 @@
 - Review date: 2026-06-28
 - Upstream repository: <https://github.com/vexxhost/migratekit>
 - Number of PRs reviewed: 17
-- Current synchronization status: Review complete. No upstream pull requests
-  have been integrated during this review. Integration is pending approval and
-  should proceed one PR at a time.
+- Current synchronization status: PR #154 has been integrated locally on branch
+  `upstream/pr-154`. Remaining upstream PRs are pending approval and should
+  proceed one PR at a time.
 
 ## Synchronization Strategy
 
@@ -48,7 +48,7 @@ validation still required.
 
 | PR | Title | Status | Decision | Planned Branch | Priority | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| [#154](https://github.com/vexxhost/migratekit/pull/154) | fix(nbdkit): scope VDDK library path to nbdkit | Ready to Integrate | Merge Immediately | `upstream/pr-154` | P0 | Small runtime hygiene fix; patch applies cleanly. |
+| [#154](https://github.com/vexxhost/migratekit/pull/154) | fix(nbdkit): scope VDDK library path to nbdkit | Integrated | Merge Immediately | `upstream/pr-154` | P0 | Integrated locally 2026-06-28; pending fork PR/merge. |
 | [#141](https://github.com/vexxhost/migratekit/pull/141) | ci: enforce least-privilege permissions for GitHub Actions workflows | Ready to Integrate | Merge Immediately | `upstream/pr-141` | P0 | Low-risk CI permission hardening; verify GHCR publish permissions. |
 | [#132](https://github.com/vexxhost/migratekit/pull/132) | fix(deps): update module github.com/sirupsen/logrus to v1.9.4 | Pending Review | Merge After Review | `upstream/pr-132` | P1 | Low-risk logging dependency bump. |
 | [#143](https://github.com/vexxhost/migratekit/pull/143) | fix(deps): update module github.com/spf13/cobra to v1.10.2 | Pending Review | Merge After Review | `upstream/pr-143` | P1 | Validate CLI help and flag parsing. |
@@ -68,9 +68,6 @@ validation still required.
 
 ## Integration History
 
-No upstream pull requests have been integrated yet as of 2026-06-28.
-
-Future entries should use this format:
-
 | Date | PR Number | Summary | Validation performed | Merge commit | Related investigation |
 | --- | --- | --- | --- | --- | --- |
+| 2026-06-28 | [#154](https://github.com/vexxhost/migratekit/pull/154) | Scoped VMware VDDK `LD_LIBRARY_PATH` to the `nbdkit` child process instead of mutating the migratekit process environment. | `go fmt ./...`; `go vet ./...`; `go test ./...` | Pending fork PR/merge | N/A |
