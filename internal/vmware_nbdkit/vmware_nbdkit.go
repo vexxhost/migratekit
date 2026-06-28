@@ -2,6 +2,7 @@ package vmware_nbdkit
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"os"
 	"os/exec"
@@ -308,7 +309,7 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 	return nil
 }
 
-func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V bool) error {
+func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V bool) (err error) {
 	snapshotChangeId, err := vmware.GetChangeID(s.Disk)
 	if err != nil {
 		return err
@@ -323,7 +324,26 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 	if err != nil {
 		return err
 	}
-	defer t.Disconnect(ctx)
+
+	logger := log.WithFields(log.Fields{
+		"disk_key": s.Disk.Key,
+	})
+	defer func() {
+		logger.Info("Disconnecting target disk")
+
+		disconnectErr := t.Disconnect(ctx)
+		if disconnectErr != nil {
+			logger.WithError(disconnectErr).Error("Failed to disconnect target disk")
+			if err == nil {
+				err = disconnectErr
+			} else {
+				err = errors.Join(err, disconnectErr)
+			}
+			return
+		}
+
+		logger.Info("Target disk disconnected")
+	}()
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -387,5 +407,5 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 		}
 	}
 
-	return nil
+	return err
 }
