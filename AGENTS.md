@@ -44,11 +44,65 @@ Then change into the project directory:
 cd /app
 ```
 
-All builds, testing, formatting, and development work should occur from within this container.
+All builds, testing, formatting, debugging, and development work should occur from within this container.
 
 ---
 
-## Development Workflow
+# Development Workflow
+
+## Branching Strategy
+
+Follow Git best practices.
+
+* **Never develop directly on `main`.**
+* **Never commit directly to `main`.**
+* **Never push directly to `main`.**
+* Always start new work from the latest `main`:
+
+```bash
+git checkout main
+git pull --ff-only origin main
+git checkout -b <branch-name>
+```
+
+Use descriptive branch names:
+
+* `bugfix/<name>`
+* `feature/<name>`
+* `docs/<name>`
+* `upstream/pr-<number>`
+* `experimental/<name>`
+
+Every change must be reviewed through a Pull Request before merging into `main`.
+
+Always sign commits:
+
+```bash
+git commit -s -m "Commit message"
+```
+
+---
+
+## Development Lifecycle
+
+Every task should follow this workflow:
+
+1. Investigate
+2. Document
+3. Implement
+4. Validate
+5. Commit
+6. Push
+7. Open Pull Request
+8. Review
+9. Merge
+10. Update documentation
+
+Do not skip the investigation step for non-trivial bugs.
+
+---
+
+## Standard Validation
 
 Before considering any task complete, execute:
 
@@ -58,11 +112,71 @@ go vet ./...
 go test ./...
 ```
 
-If module dependencies have changed, also execute:
+If module dependencies changed:
 
 ```bash
 go mod tidy
 ```
+
+If integration tests cannot be executed, explain exactly why.
+
+Never claim testing was performed if it was not.
+
+---
+
+## Documentation Requirements
+
+Significant work should update the appropriate documentation.
+
+Possible documents include:
+
+* `docs/architecture.md`
+* `docs/investigations/`
+* `docs/fork-history.md`
+* `docs/upstream-review.md`
+* `docs/upstream-sync.md`
+
+Every completed investigation should include:
+
+* Root cause
+* Resolution
+* Validation
+* Lessons learned
+* Future regression tests
+
+Every merged feature or bug fix should add an entry to `docs/fork-history.md`.
+
+---
+
+## Upstream Synchronization
+
+Before implementing new functionality or fixing a bug:
+
+* Review upstream pull requests.
+* Determine whether the issue has already been addressed upstream.
+* Prefer integrating upstream-compatible fixes rather than reimplementing them.
+* Avoid duplicating work already under active upstream development.
+
+When evaluating upstream changes:
+
+* Document the review in `docs/upstream-review.md`.
+* Maintain long-term tracking in `docs/upstream-sync.md`.
+
+When integrating upstream work:
+
+* Create a dedicated branch:
+
+```
+upstream/pr-<number>
+```
+
+* Review the implementation.
+* Validate locally.
+* Open a Pull Request into this fork.
+* Update `docs/upstream-sync.md`.
+* Update `docs/fork-history.md` if the merge materially changes the fork.
+
+Never merge upstream code directly into `main`.
 
 ---
 
@@ -107,23 +221,23 @@ Migration correctness always takes precedence over optimization.
 
 Avoid introducing changes that could:
 
-* corrupt migrated disks
-* lose incremental synchronization state
-* modify source VMware infrastructure outside of cutover
-* expose credentials in logs
-* make retries unsafe
+* Corrupt migrated disks.
+* Lose incremental synchronization state.
+* Modify source VMware infrastructure outside of cutover.
+* Expose credentials in logs.
+* Make retries unsafe.
 
-When modifying migration logic, favor correctness, traceability, and recoverability over performance.
+When modifying migration logic, favor correctness, traceability, recoverability, and idempotency over performance.
 
 ---
 
 ## Upstream Compatibility
 
-Classify every change as one of:
+Classify every completed change as one of:
 
-* **upstream-compatible**
-* **local-customization**
-* **experimental**
+* **Upstream-compatible**
+* **Local-customization**
+* **Experimental**
 
 Prefer upstream-compatible implementations whenever feasible.
 
@@ -139,7 +253,9 @@ After completing work, report:
 
 * Files modified
 * Commands executed
-* Test results
-* Any skipped validation
+* Tests passed
+* Tests skipped
+* Manual validation performed
 * Remaining risks
 * Compatibility classification
+* Whether documentation was updated
