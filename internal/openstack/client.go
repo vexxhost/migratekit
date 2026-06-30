@@ -264,6 +264,12 @@ func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *ob
 			return err
 		}
 
+		waitOpts := VolumeWaitOptsFromContext(ctx)
+		volume, err = c.EnsureVolumeAvailable(ctx, volume.ID, waitOpts.DetachTimeout)
+		if err != nil {
+			return err
+		}
+
 		blockDevices = append(blockDevices, servers.BlockDevice{
 			BootIndex:       diskIndex,
 			SourceType:      servers.SourceVolume,
