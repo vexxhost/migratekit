@@ -94,7 +94,11 @@ func volumeAttachComplete(status string, attachmentCount int, devicePath string)
 }
 
 func (t *OpenStack) Connect(ctx context.Context) error {
-	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volume, err := t.ClientSet.GetVolumeForDisk(
+		openstack.WithReauthOperation(ctx, "connect target disk: lookup volume"),
+		t.VirtualMachine,
+		t.Disk,
+	)
 	volumeMetadata := map[string]string{
 		"migrate_kit": "true",
 		"vm":          t.VirtualMachine.Reference().Value,
@@ -120,7 +124,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			log.WithFields(log.Fields{
 				"volume_id": volume.ID,
 			}).Info("Volume created, setting to bootable")
-			err := volumes.SetBootable(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.BootableOpts{
+			err := volumes.SetBootable(openstack.WithReauthOperation(ctx, "set target volume bootable"), t.ClientSet.BlockStorage, volume.ID, volumes.BootableOpts{
 				Bootable: true,
 			}).ExtractErr()
 			if err != nil {
@@ -189,7 +193,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 				}
 			}
 
-			err = volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
+			err = volumes.SetImageMetadata(openstack.WithReauthOperation(ctx, "set target volume image metadata"), t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
 				Metadata: volumeImageMetadata,
 			}).ExtractErr()
 			if err != nil {
@@ -221,7 +225,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			"instance_uuid": instanceUUID,
 		}).Info("Detected instance UUID, attaching volume...")
 
-		_, err = volumeattach.Create(ctx, t.ClientSet.Compute, instanceUUID, volumeattach.CreateOpts{
+		_, err = volumeattach.Create(openstack.WithReauthOperation(ctx, "attach target volume"), t.ClientSet.Compute, instanceUUID, volumeattach.CreateOpts{
 			VolumeID: volume.ID,
 		}).Extract()
 		if err != nil {
@@ -239,7 +243,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 
 func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, metadata map[string]string) (*volumes.Volume, error) {
 	log.Info("Creating new volume")
-	volume, err := volumes.Create(ctx, t.ClientSet.BlockStorage, volumes.CreateOpts{
+	volume, err := volumes.Create(openstack.WithReauthOperation(ctx, "create target volume"), t.ClientSet.BlockStorage, volumes.CreateOpts{
 		Name:             DiskLabel(t.VirtualMachine, t.Disk),
 		Size:             int(math.Ceil(float64(t.Disk.CapacityInBytes) / 1024 / 1024 / 1024)),
 		AvailabilityZone: opts.AvailabilityZone,
@@ -252,6 +256,7 @@ func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, me
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	ctx = openstack.WithReauthOperation(ctx, "wait for target volume availability")
 
 	err = volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
 	if err != nil {
@@ -262,7 +267,11 @@ func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, me
 }
 
 func (t *OpenStack) GetPath(ctx context.Context) (string, error) {
-	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volume, err := t.ClientSet.GetVolumeForDisk(
+		openstack.WithReauthOperation(ctx, "get target volume path: lookup volume"),
+		t.VirtualMachine,
+		t.Disk,
+	)
 	if err != nil {
 		return "", err
 	}
@@ -278,6 +287,7 @@ func (t *OpenStack) GetPath(ctx context.Context) (string, error) {
 func (t *OpenStack) waitForVolumeAttached(ctx context.Context, volumeID string, logger *log.Entry) (string, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, volumeAttachTimeout)
 	defer cancel()
+	waitCtx = openstack.WithReauthOperation(waitCtx, "wait for target volume attach")
 
 	ticker := time.NewTicker(volumeAttachPollInterval)
 	defer ticker.Stop()
@@ -333,7 +343,11 @@ func (t *OpenStack) waitForVolumeAttached(ctx context.Context, volumeID string, 
 }
 
 func (t *OpenStack) Disconnect(ctx context.Context) error {
-	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volume, err := t.ClientSet.GetVolumeForDisk(
+		openstack.WithReauthOperation(ctx, "disconnect target disk: lookup volume"),
+		t.VirtualMachine,
+		t.Disk,
+	)
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		return nil
 	} else if err != nil {
@@ -371,7 +385,7 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 		return err
 	}
 
-	err = volumeattach.Delete(ctx, t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr()
+	err = volumeattach.Delete(openstack.WithReauthOperation(ctx, "detach target volume"), t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr()
 	if err != nil {
 		return err
 	}
@@ -382,6 +396,7 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 func (t *OpenStack) waitForVolumeDetached(ctx context.Context, volumeID string, logger *log.Entry) error {
 	waitCtx, cancel := context.WithTimeout(ctx, volumeDetachTimeout)
 	defer cancel()
+	waitCtx = openstack.WithReauthOperation(waitCtx, "wait for target volume detach")
 
 	ticker := time.NewTicker(volumeDetachPollInterval)
 	defer ticker.Stop()
@@ -433,7 +448,11 @@ func (t *OpenStack) waitForVolumeDetached(ctx context.Context, volumeID string, 
 }
 
 func (t *OpenStack) Exists(ctx context.Context) (bool, error) {
-	_, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	_, err := t.ClientSet.GetVolumeForDisk(
+		openstack.WithReauthOperation(ctx, "check target volume exists"),
+		t.VirtualMachine,
+		t.Disk,
+	)
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		return false, nil
 	} else if err != nil {
@@ -444,7 +463,11 @@ func (t *OpenStack) Exists(ctx context.Context) (bool, error) {
 }
 
 func (t *OpenStack) GetCurrentChangeID(ctx context.Context) (*vmware.ChangeID, error) {
-	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volume, err := t.ClientSet.GetVolumeForDisk(
+		openstack.WithReauthOperation(ctx, "read target volume change ID"),
+		t.VirtualMachine,
+		t.Disk,
+	)
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		return &vmware.ChangeID{}, nil
 	} else if err != nil {
@@ -459,14 +482,18 @@ func (t *OpenStack) GetCurrentChangeID(ctx context.Context) (*vmware.ChangeID, e
 }
 
 func (t *OpenStack) WriteChangeID(ctx context.Context, changeID *vmware.ChangeID) error {
-	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	volume, err := t.ClientSet.GetVolumeForDisk(
+		openstack.WithReauthOperation(ctx, "write target volume change ID: lookup volume"),
+		t.VirtualMachine,
+		t.Disk,
+	)
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		return nil
 	}
 
 	volume.Metadata["change_id"] = changeID.Value
 
-	_, err = volumes.Update(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.UpdateOpts{
+	_, err = volumes.Update(openstack.WithReauthOperation(ctx, "write target volume change ID"), t.ClientSet.BlockStorage, volume.ID, volumes.UpdateOpts{
 		Metadata: volume.Metadata,
 	}).Extract()
 

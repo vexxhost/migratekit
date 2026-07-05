@@ -1,5 +1,42 @@
 # Fork History
 
+## 2026-07-05 - OpenStack Token Refresh for Long Disk Copies
+
+### Summary
+
+Enabled Gophercloud reauthentication so long-running disk migrations can refresh
+OpenStack credentials after Keystone token expiry and retry a 401 response once.
+
+### Root Cause
+
+Migratekit authenticated OpenStack clients once per target disk, then reused the
+same provider across long copy operations. Gophercloud reauthentication was not
+enabled, so post-copy Cinder/Nova calls could reuse an expired token.
+
+### Solution
+
+Enable reusable OpenStack auth reauthentication in `internal/openstack`, add
+safe reauth diagnostics with operation labels, and preserve token-only auth
+behavior.
+
+### Validation
+
+- `go fmt ./...`
+- `go vet ./...`
+- `go test ./...`
+
+### Compatibility
+
+Upstream-compatible.
+
+### Related Files
+
+- `internal/openstack/client.go`
+- `internal/openstack/client_test.go`
+- `internal/target/openstack.go`
+- `main.go`
+- `docs/investigations/openstack-token-expiry-long-copy.md`
+
 ## 2026-06-28 - Upstream PR #154 VDDK Environment Scoping
 
 ### Summary
