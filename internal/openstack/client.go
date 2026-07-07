@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -23,6 +24,10 @@ import (
 
 var ErrorVolumeNotFound = errors.New("volume not found")
 
+const defaultReauthOperation = "unspecified"
+
+type reauthOperationContextKey struct{}
+
 type ClientSet struct {
 	BlockStorage *gophercloud.ServiceClient
 	Compute      *gophercloud.ServiceClient
@@ -33,11 +38,66 @@ type PortCreateOpts struct {
 	SecurityGroups *[]string
 }
 
+func WithReauthOperation(ctx context.Context, operation string) context.Context {
+	if operation == "" {
+		return ctx
+	}
+
+	return context.WithValue(ctx, reauthOperationContextKey{}, operation)
+}
+
+func withDefaultReauthOperation(ctx context.Context, operation string) context.Context {
+	if reauthOperationFromContext(ctx) != defaultReauthOperation {
+		return ctx
+	}
+
+	return WithReauthOperation(ctx, operation)
+}
+
+func reauthOperationFromContext(ctx context.Context) string {
+	operation, ok := ctx.Value(reauthOperationContextKey{}).(string)
+	if !ok || operation == "" {
+		return defaultReauthOperation
+	}
+
+	return operation
+}
+
+func enableReauthentication(opts *gophercloud.AuthOptions) {
+	if opts.TokenID != "" {
+		return
+	}
+
+	opts.AllowReauth = true
+}
+
+func wrapReauthLogging(provider *gophercloud.ProviderClient) {
+	if provider.ReauthFunc == nil {
+		return
+	}
+
+	reauth := provider.ReauthFunc
+	provider.ReauthFunc = func(ctx context.Context) error {
+		logger := log.WithField("operation", reauthOperationFromContext(ctx))
+
+		logger.Info("Attempting OpenStack reauthentication")
+		err := reauth(ctx)
+		if err != nil {
+			logger.WithField("error_type", fmt.Sprintf("%T", err)).Warn("OpenStack reauthentication failed")
+			return err
+		}
+
+		logger.Info("OpenStack reauthentication succeeded")
+		return nil
+	}
+}
+
 func NewClientSet(ctx context.Context) (*ClientSet, error) {
 	opts, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
 		return nil, err
 	}
+	enableReauthentication(&opts)
 
 	provider, err := openstack.NewClient(opts.IdentityEndpoint)
 	if err != nil {
@@ -64,6 +124,7 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 	if err != nil {
 		return nil, err
 	}
+	wrapReauthLogging(provider)
 
 	blockStorageClient, err := openstack.NewBlockStorageV3(provider, gophercloud.EndpointOpts{
 		Region: os.Getenv("OS_REGION_NAME"),
@@ -94,6 +155,7 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 }
 
 func (c *ClientSet) GetVolumeForDisk(ctx context.Context, vm *object.VirtualMachine, disk *types.VirtualDisk) (*volumes.Volume, error) {
+	ctx = withDefaultReauthOperation(ctx, "get volume for disk")
 
 	vzUnsafeVolumeByName := ctx.Value("vzUnsafeVolumeByName").(bool)
 
@@ -143,6 +205,8 @@ func (c *ClientSet) GetVolumeForDisk(ctx context.Context, vm *object.VirtualMach
 // Deprecated, ensuring backward compatibility
 // TODO: remove
 func (c *ClientSet) GetVolumeListForDiskOld(ctx context.Context, vm *object.VirtualMachine, disk *types.VirtualDisk) ([]volumes.Volume, error) {
+	ctx = withDefaultReauthOperation(ctx, "get legacy volume for disk")
+
 	pages, err := volumes.List(c.BlockStorage, volumes.ListOpts{
 		Name: VolumeNameOld(vm, disk),
 		Metadata: map[string]string{
@@ -161,6 +225,8 @@ func (c *ClientSet) GetVolumeListForDiskOld(ctx context.Context, vm *object.Virt
 }
 
 func (c *ClientSet) EnsurePortsForVirtualMachine(ctx context.Context, vm *object.VirtualMachine, networkMappings *cmd.NetworkMappingFlag) ([]servers.Network, error) {
+	ctx = withDefaultReauthOperation(ctx, "ensure virtual machine ports")
+
 	devices, err := vm.Device(context.Background())
 	if err != nil {
 		return nil, err
@@ -243,6 +309,8 @@ func (c *ClientSet) EnsurePortsForVirtualMachine(ctx context.Context, vm *object
 }
 
 func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *object.VirtualMachine, flavor string, networks []servers.Network, availabilityZone string) error {
+	ctx = withDefaultReauthOperation(ctx, "create virtual machine resources")
+
 	var o mo.VirtualMachine
 	err := vm.Properties(ctx, vm.Reference(), []string{"config"}, &o)
 	if err != nil {

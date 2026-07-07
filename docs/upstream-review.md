@@ -10,6 +10,29 @@ on GitHub API metadata, PR file lists, PR patch contents, and a non-mutating
 
 No upstream code was merged, cherry-picked, or applied during this review.
 
+## 2026-07-05 Issue-Specific Review - OpenStack Token Expiry
+
+Reviewed current open upstream PR metadata for an existing fix to stale
+OpenStack tokens after long disk-copy operations.
+
+Current open upstream PRs reviewed by title and issue relevance:
+
+- [#164](https://github.com/vexxhost/migratekit/pull/164) - v2v with all guest
+  disks; no token/session handling.
+- [#163](https://github.com/vexxhost/migratekit/pull/163) - OpenStack volume
+  attachment waits; touches OpenStack target code but the patch contains no
+  `auth`, `token`, `401`, `AllowReauth`, or `Reauth` changes.
+- [#124](https://github.com/vexxhost/migratekit/pull/124) - Gophercloud
+  dependency update only (`go.mod`, `go.sum`).
+- Remaining open PRs are dependency, CI, Fedora image, VMware, CLI, or local
+  target changes and do not address OpenStack authentication refresh.
+
+Conclusion: no open upstream PR addresses the stale OpenStack token failure.
+The local fix in
+`docs/investigations/openstack-token-expiry-long-copy.md` remains
+upstream-compatible because it enables Gophercloud's built-in bounded
+reauthentication behavior.
+
 ## Executive Summary
 
 Total PRs reviewed: 17

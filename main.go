@@ -255,7 +255,7 @@ var cutoverCmd = &cobra.Command{
 
 		log.Info("Ensuring OpenStack resources exist")
 
-		flavor, err := flavors.Get(ctx, clients.Compute, flavorId).Extract()
+		flavor, err := flavors.Get(openstack.WithReauthOperation(ctx, "validate cutover flavor"), clients.Compute, flavorId).Extract()
 		if err != nil {
 			return err
 		}

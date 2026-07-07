@@ -2,9 +2,9 @@
 
 ## Current Status
 
-- Review date: 2026-06-28
+- Review date: 2026-06-28; issue-specific check updated 2026-07-05
 - Upstream repository: <https://github.com/vexxhost/migratekit>
-- Number of PRs reviewed: 17
+- Number of PRs tracked: 19
 - Current synchronization status: PR #154 has been integrated locally on branch
   `upstream/pr-154`. Remaining upstream PRs are pending approval and should
   proceed one PR at a time.
@@ -48,6 +48,8 @@ validation still required.
 
 | PR | Title | Status | Decision | Planned Branch | Priority | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
+| [#164](https://github.com/vexxhost/migratekit/pull/164) | fix(v2v): run conversion with all guest disks | Pending Review | Review Separately | `upstream/pr-164` | P2 | Issue-specific review 2026-07-05: not related to OpenStack token refresh. |
+| [#163](https://github.com/vexxhost/migratekit/pull/163) | fix(openstack): wait for volume attachment state | Pending Review | Review Separately | `upstream/pr-163` | P2 | Issue-specific review 2026-07-05: touches OpenStack attach/detach, but patch contains no auth/token/401/reauth changes. |
 | [#154](https://github.com/vexxhost/migratekit/pull/154) | fix(nbdkit): scope VDDK library path to nbdkit | Integrated | Merge Immediately | `upstream/pr-154` | P0 | Integrated locally 2026-06-28; pending fork PR/merge. |
 | [#141](https://github.com/vexxhost/migratekit/pull/141) | ci: enforce least-privilege permissions for GitHub Actions workflows | Ready to Integrate | Merge Immediately | `upstream/pr-141` | P0 | Low-risk CI permission hardening; verify GHCR publish permissions. |
 | [#132](https://github.com/vexxhost/migratekit/pull/132) | fix(deps): update module github.com/sirupsen/logrus to v1.9.4 | Pending Review | Merge After Review | `upstream/pr-132` | P1 | Low-risk logging dependency bump. |
