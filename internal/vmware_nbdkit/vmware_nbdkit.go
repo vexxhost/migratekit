@@ -421,7 +421,7 @@ func (s *NbdkitServer) injectUdevNicRules(ctx context.Context, path string) erro
 		return nil
 	}
 
-	var rules []string
+	var echoLines []string
 	for i, nic := range nics {
 		card := nic.(types.BaseVirtualEthernetCard).GetVirtualEthernetCard()
 		name := nicInterfaceName(nic, i)
@@ -431,28 +431,22 @@ func (s *NbdkitServer) injectUdevNicRules(ctx context.Context, path string) erro
 			"name": name,
 		}).Info("Adding udev NIC rule")
 
-		rules = append(rules, fmt.Sprintf(
+		rule := fmt.Sprintf(
 			`SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="%s", NAME="%s"`,
 			card.MacAddress, name,
-		))
+		)
+		echoLines = append(echoLines, fmt.Sprintf("echo '%s'", rule))
 	}
 
-	rulesContent := strings.Join(rules, "\n") + "\n"
-
-	tmpFile, err := os.CreateTemp("", "udev-nic-rules-*.rules")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(rulesContent); err != nil {
-		return err
-	}
-	tmpFile.Close()
+	// Write the rules file inline via --run-command to avoid inode corruption
+	// that --upload can cause on ext4 filesystems.
+	shellCmd := fmt.Sprintf(
+		"{ %s; } > /etc/udev/rules.d/70-persistent-net.rules",
+		strings.Join(echoLines, "; "),
+	)
 
 	os.Setenv("LIBGUESTFS_BACKEND", "direct")
-	cmd := exec.Command("virt-customize", "-a", path,
-		"--upload", tmpFile.Name()+":/etc/udev/rules.d/70-persistent-net.rules")
+	cmd := exec.Command("virt-customize", "-a", path, "--run-command", shellCmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
