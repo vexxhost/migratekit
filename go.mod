@@ -9,7 +9,7 @@ require (
 	github.com/gosimple/slug v1.15.0
 	github.com/k0kubun/go-ansi v0.0.0-20180517002512-3bf9e2903213
 	github.com/schollz/progressbar/v3 v3.18.0
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.1
 	github.com/thediveo/enumflag/v2 v2.0.7
 	github.com/vmware/govmomi v0.52.0
