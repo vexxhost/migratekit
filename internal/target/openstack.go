@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/volumeattach"
 	log "github.com/sirupsen/logrus"
@@ -21,11 +22,25 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 )
 
-const (
+var (
 	volumeAttachTimeout      = 2 * time.Minute
 	volumeAttachPollInterval = 1 * time.Second
 	volumeDetachTimeout      = 5 * time.Minute
 	volumeDetachPollInterval = 1 * time.Second
+)
+
+var (
+	findVolumeDevice = findDevice
+
+	getTargetVolumeForDisk = func(ctx context.Context, clients *openstack.ClientSet, vm *object.VirtualMachine, disk *types.VirtualDisk) (*volumes.Volume, error) {
+		return clients.GetVolumeForDisk(ctx, vm, disk)
+	}
+
+	getCurrentInstanceUUID = openstack.GetCurrentInstanceUUID
+
+	deleteVolumeAttachment = func(ctx context.Context, compute *gophercloud.ServiceClient, instanceUUID string, volumeID string) error {
+		return volumeattach.Delete(ctx, compute, instanceUUID, volumeID).ExtractErr()
+	}
 )
 
 type OpenStack struct {
@@ -58,15 +73,28 @@ func (t *OpenStack) GetDisk() *types.VirtualDisk {
 }
 
 func findDevice(volumeID string) (string, error) {
-	files, err := os.ReadDir("/dev/disk/by-id/")
+	return findDeviceInDir(volumeID, "/dev/disk/by-id/")
+}
+
+func findDeviceInDir(volumeID string, deviceDir string) (string, error) {
+	files, err := os.ReadDir(deviceDir)
 	if err != nil {
 		return "", err
 	}
 
+	matchID := volumeID
+	if len(matchID) > 18 {
+		matchID = matchID[:18]
+	}
+
 	for _, file := range files {
-		if strings.Contains(file.Name(), volumeID[:18]) {
-			devicePath, err := filepath.EvalSymlinks(filepath.Join("/dev/disk/by-id/", file.Name()))
+		if strings.Contains(file.Name(), matchID) {
+			devicePath, err := filepath.EvalSymlinks(filepath.Join(deviceDir, file.Name()))
 			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+
 				return "", err
 			}
 
@@ -83,6 +111,42 @@ func volumeDetachedInOpenStack(status string, attachmentCount int) bool {
 
 func volumeDetachComplete(status string, attachmentCount int, devicePath string) bool {
 	return volumeDetachedInOpenStack(status, attachmentCount) && devicePath == ""
+}
+
+func volumeAttachedToServer(attachments []volumes.Attachment, serverID string) bool {
+	if serverID == "" {
+		return false
+	}
+
+	for _, attachment := range attachments {
+		if strings.EqualFold(attachment.ServerID, serverID) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func volumeAttachmentIDsForServer(attachments []volumes.Attachment, serverID string) []string {
+	if serverID == "" {
+		return nil
+	}
+
+	ids := []string{}
+	for _, attachment := range attachments {
+		if !strings.EqualFold(attachment.ServerID, serverID) {
+			continue
+		}
+
+		switch {
+		case attachment.AttachmentID != "":
+			ids = append(ids, attachment.AttachmentID)
+		case attachment.ID != "":
+			ids = append(ids, attachment.ID)
+		}
+	}
+
+	return ids
 }
 
 func volumeAttachedInOpenStack(status string, attachmentCount int) bool {
@@ -216,7 +280,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 	}
 
 	if path == "" {
-		instanceUUID, err := openstack.GetCurrentInstanceUUID()
+		instanceUUID, err := getCurrentInstanceUUID()
 		if err != nil {
 			return err
 		}
@@ -276,7 +340,7 @@ func (t *OpenStack) GetPath(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	devicePath, err := findDevice(volume.ID)
+	devicePath, err := findVolumeDevice(volume.ID)
 	if err != nil {
 		return "", err
 	}
@@ -304,7 +368,7 @@ func (t *OpenStack) waitForVolumeAttached(ctx context.Context, volumeID string, 
 			return "", err
 		}
 
-		devicePath, err := findDevice(volumeID)
+		devicePath, err := findVolumeDevice(volumeID)
 		if err != nil {
 			return "", err
 		}
@@ -343,8 +407,9 @@ func (t *OpenStack) waitForVolumeAttached(ctx context.Context, volumeID string, 
 }
 
 func (t *OpenStack) Disconnect(ctx context.Context) error {
-	volume, err := t.ClientSet.GetVolumeForDisk(
+	volume, err := getTargetVolumeForDisk(
 		openstack.WithReauthOperation(ctx, "disconnect target disk: lookup volume"),
+		t.ClientSet,
 		t.VirtualMachine,
 		t.Disk,
 	)
@@ -359,7 +424,7 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 		"volume_id": volume.ID,
 	})
 
-	devicePath, err := findDevice(volume.ID)
+	devicePath, err := findVolumeDevice(volume.ID)
 	if err != nil {
 		return err
 	}
@@ -371,29 +436,43 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 
 	if volumeDetachedInOpenStack(volume.Status, len(volume.Attachments)) {
 		logger.WithField("device", devicePath).Info("Volume is detached in OpenStack; waiting for local device path to disappear")
-		return t.waitForVolumeDetached(ctx, volume.ID, logger)
+		return t.waitForVolumeDetached(ctx, volume.ID, "", logger)
 	}
+
+	instanceUUID, err := getCurrentInstanceUUID()
+	if err != nil {
+		return err
+	}
+
+	helperAttachmentIDs := volumeAttachmentIDsForServer(volume.Attachments, instanceUUID)
 
 	if devicePath == "" {
-		logger.Warn("Volume device path not found before detach; attempting detach by volume ID")
+		logger.WithFields(log.Fields{
+			"attachment_ids": helperAttachmentIDs,
+			"instance_uuid":  instanceUUID,
+		}).Warn("Volume device path not found before detach; attempting detach by volume ID")
 	} else {
-		logger.WithField("device", devicePath).Info("Detaching volume")
+		logger.WithFields(log.Fields{
+			"attachment_ids": helperAttachmentIDs,
+			"device":         devicePath,
+			"instance_uuid":  instanceUUID,
+		}).Info("Detaching volume")
 	}
 
-	instanceUUID, err := openstack.GetCurrentInstanceUUID()
+	err = deleteVolumeAttachment(openstack.WithReauthOperation(ctx, "detach target volume"), t.ClientSet.Compute, instanceUUID, volume.ID)
 	if err != nil {
+		logger.WithError(err).WithFields(log.Fields{
+			"attachment_ids": helperAttachmentIDs,
+			"device":         devicePath,
+			"instance_uuid":  instanceUUID,
+		}).Warn("Volume detach request failed")
 		return err
 	}
 
-	err = volumeattach.Delete(openstack.WithReauthOperation(ctx, "detach target volume"), t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr()
-	if err != nil {
-		return err
-	}
-
-	return t.waitForVolumeDetached(ctx, volume.ID, logger)
+	return t.waitForVolumeDetached(ctx, volume.ID, instanceUUID, logger)
 }
 
-func (t *OpenStack) waitForVolumeDetached(ctx context.Context, volumeID string, logger *log.Entry) error {
+func (t *OpenStack) waitForVolumeDetached(ctx context.Context, volumeID string, instanceUUID string, logger *log.Entry) error {
 	waitCtx, cancel := context.WithTimeout(ctx, volumeDetachTimeout)
 	defer cancel()
 	waitCtx = openstack.WithReauthOperation(waitCtx, "wait for target volume detach")
@@ -402,46 +481,84 @@ func (t *OpenStack) waitForVolumeDetached(ctx context.Context, volumeID string, 
 	defer ticker.Stop()
 
 	logger.Info("Waiting for volume detach to complete")
+	startedAt := time.Now()
 
 	var lastStatus string
 	var lastAttachmentCount int
+	var lastHelperAttached bool
+	var lastHelperAttachmentIDs []string
 	var lastDevicePath string
 
+	timeoutErr := func() error {
+		fields := log.Fields{
+			"status":                lastStatus,
+			"attachments":           lastAttachmentCount,
+			"helper_attached":       lastHelperAttached,
+			"helper_attachment_ids": lastHelperAttachmentIDs,
+			"device":                lastDevicePath,
+			"elapsed":               time.Since(startedAt).String(),
+		}
+		logger.WithFields(fields).Warn("Volume detach timed out")
+		return fmt.Errorf(
+			"timed out waiting for volume detach: status=%s attachments=%d helper_attached=%t helper_attachments=%v device=%q elapsed=%s: %w",
+			lastStatus,
+			lastAttachmentCount,
+			lastHelperAttached,
+			lastHelperAttachmentIDs,
+			lastDevicePath,
+			time.Since(startedAt).String(),
+			waitCtx.Err(),
+		)
+	}
+
 	for {
+		select {
+		case <-waitCtx.Done():
+			return timeoutErr()
+		default:
+		}
+
 		volume, err := volumes.Get(waitCtx, t.ClientSet.BlockStorage, volumeID).Extract()
 		if err != nil {
+			if waitCtx.Err() != nil {
+				return timeoutErr()
+			}
+
+			logger.WithError(err).WithField("elapsed", time.Since(startedAt).String()).Warn("Failed to refresh volume detach state")
 			return err
 		}
 
-		devicePath, err := findDevice(volumeID)
+		devicePath, err := findVolumeDevice(volumeID)
 		if err != nil {
+			logger.WithError(err).WithField("elapsed", time.Since(startedAt).String()).Warn("Failed to read local volume device state")
 			return err
 		}
 
 		lastStatus = volume.Status
 		lastAttachmentCount = len(volume.Attachments)
+		lastHelperAttached = volumeAttachedToServer(volume.Attachments, instanceUUID)
+		lastHelperAttachmentIDs = volumeAttachmentIDsForServer(volume.Attachments, instanceUUID)
 		lastDevicePath = devicePath
 
-		if volumeDetachComplete(lastStatus, lastAttachmentCount, lastDevicePath) {
-			logger.Info("Volume detach completed")
+		fields := log.Fields{
+			"status":                lastStatus,
+			"attachments":           lastAttachmentCount,
+			"helper_attached":       lastHelperAttached,
+			"helper_attachment_ids": lastHelperAttachmentIDs,
+			"device":                lastDevicePath,
+			"elapsed":               time.Since(startedAt).String(),
+		}
+
+		if volumeDetachComplete(lastStatus, lastAttachmentCount, lastDevicePath) && !lastHelperAttached {
+			logger.WithFields(fields).Info("Volume detach completed")
 			return nil
 		}
 
-		logger.WithFields(log.Fields{
-			"status":      lastStatus,
-			"attachments": lastAttachmentCount,
-			"device":      lastDevicePath,
-		}).Debug("Volume detach still pending")
+		logger.WithFields(fields).Debug("Volume detach still pending")
 
 		select {
 		case <-waitCtx.Done():
-			return fmt.Errorf(
-				"timed out waiting for volume detach: status=%s attachments=%d device=%q: %w",
-				lastStatus,
-				lastAttachmentCount,
-				lastDevicePath,
-				waitCtx.Err(),
-			)
+			return timeoutErr()
 		case <-ticker.C:
 		}
 	}

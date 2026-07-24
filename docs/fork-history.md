@@ -1,5 +1,45 @@
 # Fork History
 
+## 2026-07-24 - OpenStack Volume Disconnect Confirmation
+
+### Summary
+
+Fixed intermittent false failures during OpenStack target-volume disconnect when
+the local block device disappears during detach confirmation.
+
+### Root Cause
+
+`internal/target.findDevice` treated `os.ErrNotExist` from resolving a matching
+`/dev/disk/by-id` symlink as a hard failure. During detach, that missing target
+is expected because the local block device can disappear before the by-id entry
+is fully removed.
+
+### Solution
+
+Treat missing symlink targets as an absent local device path while preserving
+real filesystem errors. Detach confirmation still uses bounded polling and now
+logs helper attachment state, attachment IDs when available, device path,
+elapsed wait time, and final success/failure state.
+
+### Validation
+
+- `go fmt ./...`
+- `go test ./internal/target`
+- `go test ./internal/vmware_nbdkit`
+- `go vet ./...`
+- `go test ./...`
+- `git diff --check`
+
+### Compatibility
+
+Upstream-compatible.
+
+### Related Files
+
+- `internal/target/openstack.go`
+- `internal/target/openstack_test.go`
+- `docs/investigations/volume-disconnect-confirmation.md`
+
 ## 2026-07-05 - OpenStack Token Refresh for Long Disk Copies
 
 ### Summary
