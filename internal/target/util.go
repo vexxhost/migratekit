@@ -41,6 +41,10 @@ func NeedsFullCopy(ctx context.Context, t Target) (bool, bool, error) {
 
 	snapshotChangeId, err := vmware.GetChangeID(t.GetDisk())
 	if err != nil {
+		if errors.Is(err, vmware.ErrCBTNotEnabled) {
+			log.Warning("CBT is not enabled, forcing full copy")
+			return true, false, nil
+		}
 		return false, false, err
 	}
 
