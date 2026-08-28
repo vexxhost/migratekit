@@ -110,3 +110,5 @@ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 libguestfs.org/libnbd v1.22.2-4-g3d7cc461d h1:MLQldAg8Ddg+fWD7pO9NbYJk1D7JXecMTiV7NarRwkE=
 libguestfs.org/libnbd v1.22.2-4-g3d7cc461d/go.mod h1:pSICAuDOpSGplmGmaZ8QettnBAT3IUJFcBU1bVgWgk4=
+libguestfs.org/libnbd v1.25.4 h1:RHRp6AkOi/FICrZ6aKbQaDuYbvDC/EgKc7uaS9aea2E=
+libguestfs.org/libnbd v1.25.4/go.mod h1:pSICAuDOpSGplmGmaZ8QettnBAT3IUJFcBU1bVgWgk4=

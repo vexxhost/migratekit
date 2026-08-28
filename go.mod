@@ -13,7 +13,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/thediveo/enumflag/v2 v2.0.7
 	github.com/vmware/govmomi v0.52.0
-	libguestfs.org/libnbd v1.22.2-4-g3d7cc461d
+	libguestfs.org/libnbd v1.25.4
 )
 
 require (
