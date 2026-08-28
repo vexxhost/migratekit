@@ -185,7 +185,16 @@ func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) error {
 	}()
 
 	for index, server := range s.Servers {
-		t, err := target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
+		var t target.Target
+		var err error
+
+		// Check if we're using local disk target
+		if localTargetPath := ctx.Value("localTargetPath"); localTargetPath != nil {
+			t, err = target.NewLocalDisk(ctx, s.VirtualMachine, server.Disk, localTargetPath.(string))
+		} else {
+			t, err = target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
+		}
+
 		if err != nil {
 			return err
 		}
@@ -357,23 +366,28 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 	}
 
 	if runV2V {
-		log.Info("Running virt-v2v-in-place")
-
-		os.Setenv("LIBGUESTFS_BACKEND", "direct")
-
-		var cmd *exec.Cmd
-		if s.Servers.VddkConfig.Debug {
-			cmd = exec.Command("virt-v2v-in-place", "-v", "-x", "-i", "disk", path)
+		// Check if we're using local disk - virt-v2v-in-place may not be needed for local backups
+		if _, isLocalDisk := t.(*target.LocalDisk); isLocalDisk {
+			log.Info("Skipping virt-v2v-in-place for local disk target")
 		} else {
-			cmd = exec.Command("virt-v2v-in-place", "-i", "disk", path)
-		}
+			log.Info("Running virt-v2v-in-place")
 
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+			os.Setenv("LIBGUESTFS_BACKEND", "direct")
 
-		err := cmd.Run()
-		if err != nil {
-			return err
+			var cmd *exec.Cmd
+			if s.Servers.VddkConfig.Debug {
+				cmd = exec.Command("virt-v2v-in-place", "-v", "-x", "-i", "disk", path)
+			} else {
+				cmd = exec.Command("virt-v2v-in-place", "-i", "disk", path)
+			}
+
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+
+			err := cmd.Run()
+			if err != nil {
+				return err
+			}
 		}
 
 		err = t.WriteChangeID(ctx, &vmware.ChangeID{})
