@@ -323,7 +323,15 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 	if err != nil {
 		return err
 	}
-	defer t.Disconnect(ctx)
+	connected := true
+	defer func() {
+		if connected {
+			err := t.Disconnect(ctx)
+			if err != nil {
+				log.WithError(err).Error("Failed to disconnect from target")
+			}
+		}
+	}()
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -387,5 +395,7 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 		}
 	}
 
-	return nil
+	err = t.Disconnect(ctx)
+	connected = false
+	return err
 }

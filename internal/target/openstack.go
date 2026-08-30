@@ -3,6 +3,7 @@ package target
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -67,6 +68,59 @@ func findDevice(volumeID string) (string, error) {
 	}
 
 	return "", nil
+}
+
+func hasVolumeAttachment(volume *volumes.Volume, serverID string) bool {
+	for _, attachment := range volume.Attachments {
+		if strings.EqualFold(attachment.ServerID, serverID) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func describeVolumeAttachments(volume *volumes.Volume) []string {
+	attachments := make([]string, 0, len(volume.Attachments))
+	for _, attachment := range volume.Attachments {
+		attachments = append(attachments, fmt.Sprintf("%s:%s", attachment.ServerID, attachment.ID))
+	}
+
+	return attachments
+}
+
+func waitForDevice(ctx context.Context, volumeID string, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		devicePath, err := findDevice(volumeID)
+		if err != nil {
+			return "", err
+		}
+
+		if devicePath != "" {
+			log.WithFields(log.Fields{
+				"volume_id": volumeID,
+				"device":    devicePath,
+			}).Info("Device found")
+
+			return devicePath, nil
+		}
+
+		log.WithFields(log.Fields{
+			"volume_id": volumeID,
+		}).Debug("Device for volume not found, checking again...")
+
+		select {
+		case <-ctx.Done():
+			return "", errors.Join(errors.New("timed out waiting for volume device to appear"), ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (t *OpenStack) Connect(ctx context.Context) error {
@@ -180,13 +234,18 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 		"volume_id": volume.ID,
 	}).Info("Attaching volume")
 
-	path, err := t.GetPath(ctx)
+	instanceUUID, err := openstack.GetCurrentInstanceUUID()
 	if err != nil {
 		return err
 	}
 
-	if path == "" {
-		instanceUUID, err := openstack.GetCurrentInstanceUUID()
+	waitOpts := openstack.VolumeWaitOptsFromContext(ctx)
+	if !hasVolumeAttachment(volume, instanceUUID) {
+		if len(volume.Attachments) > 0 {
+			return fmt.Errorf("volume %s is attached to other server(s): %v", volume.ID, describeVolumeAttachments(volume))
+		}
+
+		volume, err = t.ClientSet.EnsureVolumeAvailable(ctx, volume.ID, waitOpts.AttachTimeout)
 		if err != nil {
 			return err
 		}
@@ -201,38 +260,20 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-
-		timeoutTimer := time.After(2 * time.Minute)
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-timeoutTimer:
-				return errors.New("timed out waiting for volume to attach")
-			case <-ticker.C:
-				devicePath, err := findDevice(volume.ID)
-				if err != nil {
-					return err
-				}
-
-				if devicePath != "" {
-					log.WithFields(log.Fields{
-						"volume_id": volume.ID,
-						"device":    devicePath,
-					}).Info("Device found")
-
-					return nil
-				}
-
-				log.WithFields(log.Fields{
-					"volume_id": volume.ID,
-				}).Info("Device for volume not found, checking again...")
-			}
-		}
+	} else {
+		log.WithFields(log.Fields{
+			"instance_uuid": instanceUUID,
+			"volume_id":     volume.ID,
+		}).Info("Volume is already attached to this instance")
 	}
 
-	return nil
+	_, err = t.ClientSet.WaitForVolumeAttached(ctx, volume.ID, instanceUUID, waitOpts.AttachTimeout)
+	if err != nil {
+		return err
+	}
+
+	_, err = waitForDevice(ctx, volume.ID, waitOpts.AttachTimeout)
+	return err
 }
 
 func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, metadata map[string]string) (*volumes.Volume, error) {
@@ -248,12 +289,10 @@ func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, me
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	err = volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
+	waitOpts := openstack.VolumeWaitOptsFromContext(ctx)
+	volume, err = t.ClientSet.WaitForVolumeAvailable(ctx, volume.ID, waitOpts.CreateTimeout)
 	if err != nil {
-		return nil, errors.Join(errors.New("timed out waiting for volume to be available"), err)
+		return nil, err
 	}
 
 	return volume, nil
@@ -281,32 +320,28 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 		return err
 	}
 
-	devicePath, err := findDevice(volume.ID)
+	instanceUUID, err := openstack.GetCurrentInstanceUUID()
 	if err != nil {
 		return err
 	}
 
-	if devicePath != "" {
-		instanceUUID, err := openstack.GetCurrentInstanceUUID()
-		if err != nil {
-			return err
-		}
+	if hasVolumeAttachment(volume, instanceUUID) {
+		log.WithFields(log.Fields{
+			"volume_id":     volume.ID,
+			"instance_uuid": instanceUUID,
+		}).Info("Detaching volume")
 
 		err = volumeattach.Delete(ctx, t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr()
 		if err != nil {
 			return err
 		}
-
-		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		defer cancel()
-
-		err = volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
-		if err != nil {
-			return errors.Join(errors.New("timed out waiting for volume to be available"), err)
-		}
+	} else if len(volume.Attachments) > 0 {
+		return fmt.Errorf("volume %s is attached to other server(s): %v", volume.ID, describeVolumeAttachments(volume))
 	}
 
-	return nil
+	waitOpts := openstack.VolumeWaitOptsFromContext(ctx)
+	_, err = t.ClientSet.WaitForVolumeAvailable(ctx, volume.ID, waitOpts.DetachTimeout)
+	return err
 }
 
 func (t *OpenStack) Exists(ctx context.Context) (bool, error) {
