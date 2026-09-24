@@ -39,6 +39,10 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 		return nil, err
 	}
 
+	// Long warm-copy/cutover runs can outlive the Keystone token TTL; allow the
+	// provider client to transparently re-authenticate instead of failing with 401.
+	opts.AllowReauth = true
+
 	provider, err := openstack.NewClient(opts.IdentityEndpoint)
 	if err != nil {
 		return nil, err
