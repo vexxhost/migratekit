@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -34,6 +35,18 @@ type PortCreateOpts struct {
 }
 
 func NewClientSet(ctx context.Context) (*ClientSet, error) {
+	endpointOpts := gophercloud.EndpointOpts{
+		Region:       os.Getenv("OS_REGION_NAME"),
+		Availability: gophercloud.Availability(os.Getenv("OS_INTERFACE")),
+	}
+	switch endpointOpts.Availability {
+	case "":
+		endpointOpts.Availability = gophercloud.AvailabilityPublic
+	case gophercloud.AvailabilityPublic, gophercloud.AvailabilityInternal, gophercloud.AvailabilityAdmin:
+	default:
+		return nil, fmt.Errorf("invalid OS_INTERFACE %q: expected public, internal or admin", endpointOpts.Availability)
+	}
+
 	opts, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
 		return nil, err
@@ -65,23 +78,17 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 		return nil, err
 	}
 
-	blockStorageClient, err := openstack.NewBlockStorageV3(provider, gophercloud.EndpointOpts{
-		Region: os.Getenv("OS_REGION_NAME"),
-	})
+	blockStorageClient, err := openstack.NewBlockStorageV3(provider, endpointOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	computeClient, err := openstack.NewComputeV2(provider, gophercloud.EndpointOpts{
-		Region: os.Getenv("OS_REGION_NAME"),
-	})
+	computeClient, err := openstack.NewComputeV2(provider, endpointOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	networkingClient, err := openstack.NewNetworkV2(provider, gophercloud.EndpointOpts{
-		Region: os.Getenv("OS_REGION_NAME"),
-	})
+	networkingClient, err := openstack.NewNetworkV2(provider, endpointOpts)
 	if err != nil {
 		return nil, err
 	}
