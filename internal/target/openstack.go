@@ -339,8 +339,13 @@ func (t *OpenStack) WriteChangeID(ctx context.Context, changeID *vmware.ChangeID
 	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
 		return nil
+	} else if err != nil {
+		return err
 	}
 
+	if volume.Metadata == nil {
+		volume.Metadata = map[string]string{}
+	}
 	volume.Metadata["change_id"] = changeID.Value
 
 	_, err = volumes.Update(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.UpdateOpts{
