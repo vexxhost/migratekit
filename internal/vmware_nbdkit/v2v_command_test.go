@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/vexxhost/migratekit/internal/target"
@@ -35,5 +36,27 @@ func TestConversionPreparesRequestedStorageDriver(t *testing.T) {
 				t.Fatal("source arguments lost")
 			}
 		})
+	}
+}
+
+func TestConversionForwardsGuestNetworkConfigurations(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "virt-v2v-in-place"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	mappings := []string{
+		"00:11:22:33:44:55:ip:192.0.2.10,192.0.2.1,24,192.0.2.53",
+		"00:11:22:33:44:66:ip:198.51.100.10,,24",
+	}
+	ctx := context.WithValue(context.Background(), "guestNetworkConfigs", mappings)
+	output, err := conversionCommand(ctx, false, "-i", "libvirtxml", "/tmp/guest.xml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--block-driver", "virtio-blk", "--mac", mappings[0], "--mac", mappings[1], "-i", "libvirtxml", "/tmp/guest.xml"}
+	if !reflect.DeepEqual(strings.Split(strings.TrimSuffix(string(output), "\n"), "\n"), want) {
+		t.Fatalf("converter received unexpected arguments: %q", output)
 	}
 }

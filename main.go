@@ -75,6 +75,7 @@ var (
 	vzUnsafeVolumeByName bool
 	osType               string
 	enableQemuGuestAgent bool
+	guestNetworkConfigs  []string
 )
 
 var rootCmd = &cobra.Command{
@@ -200,6 +201,7 @@ var rootCmd = &cobra.Command{
 		ctx = context.WithValue(ctx, "osType", osType)
 
 		ctx = context.WithValue(ctx, "enableQemuGuestAgent", enableQemuGuestAgent)
+		ctx = context.WithValue(ctx, "guestNetworkConfigs", guestNetworkConfigs)
 
 		cmd.SetContext(ctx)
 
@@ -329,6 +331,7 @@ var cutoverCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging")
+	rootCmd.PersistentFlags().StringArrayVar(&guestNetworkConfigs, "guest-network-config", nil, "Windows guest static IP configuration forwarded to virt-v2v --mac (MAC:ip:ADDRESS,GATEWAY,PREFIX[,DNS...]); repeat for multiple NICs")
 
 	rootCmd.PersistentFlags().StringVar(&endpoint, "vmware-endpoint", "", "VMware endpoint (hostname or IP only)")
 	rootCmd.MarkPersistentFlagRequired("vmware-endpoint")

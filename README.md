@@ -190,6 +190,30 @@ There are a few optional flags to define the following:
                  and "windows"
 -   `--enable-qemu-guest-agent`: Sets the "hw_qemu_guest_agent" volume (image) metadata parameter to "yes".
 
+### Static addresses inside Windows guests
+
+`--network-mapping` creates OpenStack ports; assigning an IP to a port does not
+configure that IP inside Windows. A new VirtIO NIC can receive a new Windows
+interface identity even when its MAC is preserved, leaving the old static
+address on the former VMware interface.
+
+During conversion, repeat `--guest-network-config` to request virt-v2v's Windows
+firstboot IP configuration. Its value is forwarded unchanged to virt-v2v's
+`--mac` option, which validates the address fields:
+
+```bash
+--guest-network-config '00:11:22:33:44:55:ip:192.0.2.10,192.0.2.1,24,192.0.2.53' \
+--guest-network-config '00:11:22:33:44:66:ip:198.51.100.10,,24'
+```
+
+The fields after `:ip:` are address, gateway, prefix length, and optional DNS
+servers, separated by commas. An empty gateway supports an isolated network.
+Use the same MAC and IP in the corresponding OpenStack port mapping. This
+option applies when virt-v2v conversion runs and needs successful Windows
+firstboot driver setup. Without it, guest IP configuration is unchanged by
+this option. See [virt-v2v's documentation](https://libguestfs.org/virt-v2v.1.html)
+for supported Windows versions and field syntax.
+
 ## Contributing
 
 We welcome contributions to this project, we hope to see this project grow and

@@ -14,6 +14,11 @@ func conversionCommand(ctx context.Context, debug bool, inputArgs ...string) *ex
 		driver = "virtio-scsi"
 	}
 	args := []string{"--block-driver", driver}
+	if mappings, ok := ctx.Value("guestNetworkConfigs").([]string); ok {
+		for _, mapping := range mappings {
+			args = append(args, "--mac", mapping)
+		}
+	}
 	if debug {
 		args = append([]string{"-v", "-x"}, args...)
 	}
