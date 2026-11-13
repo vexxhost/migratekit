@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -82,6 +86,10 @@ var rootCmd = &cobra.Command{
 	Use:   "migratekit",
 	Short: "Near-live migration toolkit for VMware to OpenStack",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Validate before authentication, replication or shutting down the source.
+		if err := validateGuestNetworkOptions(guestNetworkConfigs, enablev2v); err != nil {
+			return err
+		}
 		if debug {
 			log.SetLevel(log.DebugLevel)
 		}
@@ -382,4 +390,46 @@ func main() {
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
+}
+
+func validateGuestNetworkOptions(configs []string, runV2V bool) error {
+	if len(configs) > 0 && !runV2V {
+		return fmt.Errorf("--guest-network-config requires --run-v2v=true")
+	}
+	for _, config := range configs {
+		mac, addresses, found := strings.Cut(config, ":ip:")
+		hardware, err := net.ParseMAC(mac)
+		if !found || err != nil || len(hardware) != 6 || !strings.EqualFold(mac, hardware.String()) {
+			return fmt.Errorf("invalid --guest-network-config: expected MAC:ip:ADDRESS,GATEWAY,PREFIX[,DNS...]")
+		}
+		fields := strings.Split(addresses, ",")
+		ip := net.ParseIP(fields[0])
+		if ip == nil {
+			return fmt.Errorf("invalid --guest-network-config IP address")
+		}
+		if len(fields) > 1 && fields[1] != "" {
+			gateway := net.ParseIP(fields[1])
+			if gateway == nil || (gateway.To4() == nil) != (ip.To4() == nil) {
+				return fmt.Errorf("invalid --guest-network-config gateway")
+			}
+		}
+		if len(fields) > 2 && fields[2] != "" {
+			prefix, err := strconv.Atoi(fields[2])
+			max := 128
+			if ip.To4() != nil {
+				max = 32
+			}
+			if err != nil || prefix < 0 || prefix > max {
+				return fmt.Errorf("invalid --guest-network-config prefix length")
+			}
+		}
+		if len(fields) > 3 {
+			for _, dns := range fields[3:] {
+				if net.ParseIP(dns) == nil {
+					return fmt.Errorf("invalid --guest-network-config DNS address")
+				}
+			}
+		}
+	}
+	return nil
 }
