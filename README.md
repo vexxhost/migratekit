@@ -10,7 +10,7 @@ downtime window to complete the migration.
 Migratekit has two phases that it operates in to allow you to migrate your
 virtual machine with almost no downtime which are documented below.
 
-These phases allow you to move data online as much as possible and have a 
+These phases allow you to move data online as much as possible and have a
 final cutover phase which takes the virtual machine offline for a short
 period of time to complete the migration.
 
@@ -51,7 +51,7 @@ from the VMware website.
 ### Installing VDDK
 
 In order to be able to use Migratekit, you will need to download the VDDK from
-the VMware website.  You will ened to create a developer account in order to
+the VMware website.  You will need to create a developer account in order to
 download the VDDK as well as accept the EULA.
 
 1. Download [VMware Virtual Disk Development Kit (VDDK) 8.0.2 for Linux](https://developer.broadcom.com/sdks/vmware-virtual-disk-development-kit-vddk/8.0)
