@@ -175,7 +175,15 @@ func (s *NbdkitServers) RunVirtV2VInPlace(ctx context.Context, targets []*migrat
 		return err
 	}
 
-	cmd := conversionCommand(ctx, s.VddkConfig.Debug, "-i", "libvirtxml", xmlFile.Name())
+	args := []string{"-i", "libvirtxml", xmlFile.Name()}
+	firstboot, err := s.windowsDiskFirstboot(ctx, targets)
+	if err != nil {
+		return err
+	}
+	if firstboot != "" {
+		args = append(args, "--firstboot-command", firstboot)
+	}
+	cmd := conversionCommand(ctx, s.VddkConfig.Debug, args...)
 	inputs := make([]target.Target, 0, len(targets))
 	for _, mt := range targets {
 		inputs = append(inputs, mt.Target)
