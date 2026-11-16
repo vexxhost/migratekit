@@ -119,18 +119,8 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			}).Info("VMware GustId")
 
 			volumeImageMetadata := map[string]string{}
-			switch osTypeCMD := ctx.Value("osType").(string); osTypeCMD {
-			case "auto":
-				guestIdLower := strings.ToLower(o.Config.GuestId)
-				vmOsType := "linux" // linux is the default os type, TODO: Add mapping for all possible GuestIds
-				if strings.Contains(guestIdLower, "windows") {
-					vmOsType = "windows"
-				}
-				volumeImageMetadata["os_type"] = vmOsType
-			case "":
-			default:
-				volumeImageMetadata["os_type"] = osTypeCMD
-
+			if osType := requestedOSType(ctx.Value("osType").(string), o.Config.GuestId); osType != "" {
+				volumeImageMetadata["os_type"] = osType
 			}
 
 			if osType, ok := volumeImageMetadata["os_type"]; ok {
@@ -173,6 +163,8 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			}
 		}
 	} else if err != nil {
+		return err
+	} else if err := t.reconcileOSType(ctx, volume); err != nil {
 		return err
 	}
 
@@ -233,6 +225,38 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func requestedOSType(option, guestID string) string {
+	if option != "auto" {
+		return option
+	}
+	if vmware.IsWindowsGuest(guestID) {
+		return "windows"
+	}
+	return "linux"
+}
+
+func (t *OpenStack) reconcileOSType(ctx context.Context, volume *volumes.Volume) error {
+	option, _ := ctx.Value("osType").(string)
+	if option == "" {
+		return nil
+	}
+	var guestID string
+	if option == "auto" {
+		var vm mo.VirtualMachine
+		if err := t.VirtualMachine.Properties(ctx, t.VirtualMachine.Reference(), []string{"config.guestId"}, &vm); err != nil {
+			return err
+		}
+		guestID = vm.Config.GuestId
+	}
+	osType := requestedOSType(option, guestID)
+	if volume.VolumeImageMetadata["os_type"] == osType {
+		return nil
+	}
+	return volumes.SetImageMetadata(ctx, t.ClientSet.BlockStorage, volume.ID, volumes.ImageMetadataOpts{
+		Metadata: map[string]string{"os_type": osType},
+	}).ExtractErr()
 }
 
 func (t *OpenStack) createVolume(ctx context.Context, opts *VolumeCreateOpts, metadata map[string]string) (*volumes.Volume, error) {
