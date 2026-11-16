@@ -77,6 +77,9 @@ var (
 	enableQemuGuestAgent bool
 )
 
+var activeSourceLease *vmware.MigrationLease
+var recoverSourceLock bool
+
 var rootCmd = &cobra.Command{
 	Use:   "migratekit",
 	Short: "Near-live migration toolkit for VMware to OpenStack",
@@ -157,6 +160,11 @@ var rootCmd = &cobra.Command{
 
 		if o.Config.ChangeTrackingEnabled == nil || !*o.Config.ChangeTrackingEnabled {
 			return errors.New("change tracking is not enabled on the virtual machine")
+		}
+
+		activeSourceLease, err = vmware.AcquireMigrationLease(ctx, vm, recoverSourceLock)
+		if err != nil {
+			return err
 		}
 
 		if snapshotRef, _ := vm.FindSnapshot(ctx, "migratekit"); snapshotRef != nil {
@@ -350,6 +358,8 @@ func init() {
 
 	rootCmd.PersistentFlags().Var(enumflag.New(&busType, "disk-bus-type", BusTypeOptsIds, enumflag.EnumCaseInsensitive), "disk-bus-type", "Specifies the type of disk controller to attach disk devices to.")
 
+	rootCmd.PersistentFlags().BoolVar(&recoverSourceLock, "recover-source-lock", false, "Replace a stale source lease only after the previous migration has stopped")
+
 	rootCmd.PersistentFlags().BoolVar(&vzUnsafeVolumeByName, "vz-unsafe-volume-by-name", false, "Only use the name to find a volume - workaround for virtuozzu - dangerous option")
 
 	rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
@@ -376,7 +386,23 @@ func init() {
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err := executeCommand(ctx); err != nil {
 		os.Exit(1)
 	}
+}
+
+func executeCommand(ctx context.Context) (err error) {
+	defer func() {
+		if activeSourceLease == nil {
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		if cleanupErr := activeSourceLease.Release(cleanup); cleanupErr != nil {
+			log.WithError(cleanupErr).Error("Failed to release source migration lease")
+			err = errors.Join(err, cleanupErr)
+		}
+		activeSourceLease = nil
+	}()
+	return rootCmd.ExecuteContext(ctx)
 }
