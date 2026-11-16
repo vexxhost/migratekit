@@ -232,3 +232,9 @@ any of the commands that you need to run for development.
 If you need help with using Migratekit, you can either open an issue to get
 help from the community or you can contact [VEXXHOST](https://vexxhost.com/contact-us/)
 for professional support with VMware migration or OpenStack.
+
+If a VMware disk grows between replication cycles, enlarge its existing Cinder
+volume before retrying. Remove that volume's `change_id` metadata with
+`openstack volume unset --property change_id VOLUME_ID` to force a full copy
+of the enlarged disk. Migratekit refuses to attach a destination volume that is
+smaller than the current source disk. It does not resize Cinder volumes itself.

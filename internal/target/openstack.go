@@ -3,6 +3,7 @@ package target
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -71,6 +72,10 @@ func findDevice(volumeID string) (string, error) {
 
 func (t *OpenStack) Connect(ctx context.Context) error {
 	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
+	if err == nil && int64(volume.Size)*1024*1024*1024 < t.Disk.CapacityInBytes {
+		required := (t.Disk.CapacityInBytes + 1024*1024*1024 - 1) / (1024 * 1024 * 1024)
+		return fmt.Errorf("destination volume %s is %d GiB but source disk requires %d GiB: enlarge the destination and remove its change_id metadata before retrying a full copy", volume.ID, volume.Size, required)
+	}
 	volumeMetadata := map[string]string{
 		"migrate_kit": "true",
 		"vm":          t.VirtualMachine.Reference().Value,
