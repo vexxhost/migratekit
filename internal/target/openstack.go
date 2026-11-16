@@ -21,9 +21,10 @@ import (
 )
 
 type OpenStack struct {
-	VirtualMachine *object.VirtualMachine
-	Disk           *types.VirtualDisk
-	ClientSet      *openstack.ClientSet
+	VirtualMachine      *object.VirtualMachine
+	Disk                *types.VirtualDisk
+	ClientSet           *openstack.ClientSet
+	attachmentRequested bool
 }
 
 type VolumeCreateOpts struct {
@@ -186,7 +187,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 	}
 
 	if path == "" {
-		instanceUUID, err := openstack.GetCurrentInstanceUUID()
+		instanceUUID, err := openstack.GetCurrentInstanceUUID(ctx)
 		if err != nil {
 			return err
 		}
@@ -195,6 +196,7 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 			"instance_uuid": instanceUUID,
 		}).Info("Detected instance UUID, attaching volume...")
 
+		t.attachmentRequested = true
 		_, err = volumeattach.Create(ctx, t.ClientSet.Compute, instanceUUID, volumeattach.CreateOpts{
 			VolumeID: volume.ID,
 		}).Extract()
@@ -208,6 +210,8 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 
 		for {
 			select {
+			case <-ctx.Done():
+				return ctx.Err()
 			case <-timeoutTimer:
 				return errors.New("timed out waiting for volume to attach")
 			case <-ticker.C:
@@ -281,29 +285,48 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 		return err
 	}
 
-	devicePath, err := findDevice(volume.ID)
+	if len(volume.Attachments) == 0 && volume.Status == "available" && !t.attachmentRequested {
+		return nil
+	}
+	instanceUUID, err := openstack.GetCurrentInstanceUUID(ctx)
 	if err != nil {
 		return err
 	}
-
-	if devicePath != "" {
-		instanceUUID, err := openstack.GetCurrentInstanceUUID()
+	owned := false
+	for _, attachment := range volume.Attachments {
+		if attachment.ServerID == instanceUUID {
+			owned = true
+			break
+		}
+	}
+	// Nova can have an attachment record before Cinder exposes it.
+	if !owned && (t.attachmentRequested || len(volume.Attachments) == 0) {
+		pages, err := volumeattach.List(t.ClientSet.Compute, instanceUUID).AllPages(ctx)
 		if err != nil {
 			return err
 		}
-
-		err = volumeattach.Delete(ctx, t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr()
+		attachments, err := volumeattach.ExtractVolumeAttachments(pages)
 		if err != nil {
 			return err
 		}
-
+		for _, attachment := range attachments {
+			if attachment.VolumeID == volume.ID {
+				owned = true
+				break
+			}
+		}
+	}
+	if owned {
+		if err := volumeattach.Delete(ctx, t.ClientSet.Compute, instanceUUID, volume.ID).ExtractErr(); err != nil {
+			return err
+		}
 		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-
-		err = volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available")
-		if err != nil {
+		if err := volumes.WaitForStatus(ctx, t.ClientSet.BlockStorage, volume.ID, "available"); err != nil {
 			return errors.Join(errors.New("timed out waiting for volume to be available"), err)
 		}
+		t.attachmentRequested = false
+		return nil
 	}
 
 	return nil
