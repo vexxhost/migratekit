@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/erikgeiser/promptkit/confirmation"
@@ -72,7 +74,7 @@ var (
 	busType              BusTypeOpts
 	vzUnsafeVolumeByName bool
 	osType               string
-    enableQemuGuestAgent bool
+	enableQemuGuestAgent bool
 )
 
 var rootCmd = &cobra.Command{
@@ -102,7 +104,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		ctx := context.TODO()
+		ctx := cmd.Context()
 
 		soapClient := soap.NewClient(endpointUrl, true)
 		vimClient, err := vim25.NewClient(ctx, soapClient)
@@ -350,9 +352,9 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&vzUnsafeVolumeByName, "vz-unsafe-volume-by-name", false, "Only use the name to find a volume - workaround for virtuozzu - dangerous option")
 
-    rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
+	rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
 
-    rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
+	rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")
@@ -372,7 +374,9 @@ func init() {
 }
 
 func main() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
 }

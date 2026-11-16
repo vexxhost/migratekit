@@ -2,16 +2,17 @@ package nbdcopy
 
 import (
 	"bufio"
+	"context"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/vexxhost/migratekit/internal/process"
 	"github.com/vexxhost/migratekit/internal/progress"
 )
 
-func Run(source, destination string, size int64, targetIsClean bool) error {
+func Run(ctx context.Context, source, destination string, size int64, targetIsClean bool) error {
 	logger := log.WithFields(log.Fields{
 		"source":      source,
 		"destination": destination,
@@ -22,6 +23,7 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 		return err
 	}
 	defer progressRead.Close()
+	defer progressWrite.Close()
 
 	args := []string{
 		"--progress=3",
@@ -33,7 +35,7 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 		args = append(args, "--destination-is-zero")
 	}
 
-	cmd := exec.Command(
+	cmd := process.CommandContext(ctx,
 		"nbdcopy",
 		args...,
 	)
@@ -51,7 +53,9 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 	progressWrite.Close()
 
 	bar := progress.DataProgressBar("Full copy", size)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		scanner := bufio.NewScanner(progressRead)
 		for scanner.Scan() {
 			progressParts := strings.Split(scanner.Text(), "/")
@@ -69,9 +73,7 @@ func Run(source, destination string, size int64, targetIsClean bool) error {
 		}
 	}()
 
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
-
-	return nil
+	err = cmd.Wait()
+	<-done
+	return err
 }
