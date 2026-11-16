@@ -19,7 +19,7 @@ func (s *NbdkitServer) Start() error {
 	s.cmd.Stdout = os.Stdout
 	s.cmd.Stderr = os.Stderr
 
-	log.Debug("Running command: ", s.cmd)
+	log.WithField("socket", s.socket).Debug("Starting nbdkit server")
 	if err := s.cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start nbdkit server: %w", err)
 	}
