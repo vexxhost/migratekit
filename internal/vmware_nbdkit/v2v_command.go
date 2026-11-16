@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 
+	"github.com/vexxhost/migratekit/internal/process"
 	"github.com/vexxhost/migratekit/internal/target"
 )
 
@@ -17,5 +18,5 @@ func conversionCommand(ctx context.Context, debug bool, inputArgs ...string) *ex
 		args = append([]string{"-v", "-x"}, args...)
 	}
 	args = append(args, inputArgs...)
-	return exec.Command("virt-v2v-in-place", args...)
+	return process.CommandContext(ctx, "virt-v2v-in-place", args...)
 }

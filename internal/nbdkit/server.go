@@ -1,6 +1,7 @@
 package nbdkit
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,7 @@ func (s *NbdkitServer) Start() error {
 		select {
 		case <-pidFileTimeout:
 			s.cmd.Process.Kill()
+			s.cmd.Wait()
 			return fmt.Errorf("timeout waiting for pidfile to appear: %s", s.pidFile)
 		case <-tick:
 			if _, err := os.Stat(s.pidFile); err == nil {
@@ -40,12 +42,29 @@ func (s *NbdkitServer) Start() error {
 	}
 }
 
-func (s *NbdkitServer) Stop() error {
-	if err := s.cmd.Process.Kill(); err != nil {
+func (s *NbdkitServer) Interrupt() error {
+	if s.cmd.Process == nil {
+		return nil
+	}
+	if err := s.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return fmt.Errorf("failed to stop nbdkit server: %w", err)
+	}
+	return nil
+}
+
+func (s *NbdkitServer) Stop() error {
+	if err := s.Interrupt(); err != nil {
+		return err
+	}
+	if s.cmd.Process != nil && s.cmd.ProcessState == nil {
+		var exitError *exec.ExitError
+		if err := s.cmd.Wait(); err != nil && !errors.As(err, &exitError) {
+			return err
+		}
 	}
 
 	os.Remove(s.socket)
+	os.Remove(s.pidFile)
 	return nil
 }
 

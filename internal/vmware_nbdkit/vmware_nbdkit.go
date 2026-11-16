@@ -5,9 +5,8 @@ import (
 	"errors"
 	"net/url"
 	"os"
-	"os/signal"
-	"sync"
 	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vexxhost/migratekit/internal/nbdcopy"
@@ -141,20 +140,6 @@ func (s *NbdkitServers) Start(ctx context.Context) error {
 		}
 	}
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		log.Warn("Received interrupt signal, cleaning up...")
-
-		err := s.Stop(ctx)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to stop nbdkit servers")
-		}
-
-		os.Exit(1)
-	}()
-
 	return nil
 }
 
@@ -181,48 +166,63 @@ func (s *NbdkitServers) removeSnapshot(ctx context.Context) error {
 }
 
 func (s *NbdkitServers) Stop(ctx context.Context) error {
+	var errs []error
 	for _, server := range s.Servers {
 		if err := server.Nbdkit.Stop(); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-
-	err := s.removeSnapshot(ctx)
-	if err != nil {
-		return err
+	if s.SnapshotRef.Value != "" {
+		if err := s.removeSnapshot(ctx); err != nil {
+			errs = append(errs, err)
+		} else {
+			s.SnapshotRef = types.ManagedObjectReference{}
+		}
 	}
-
-	return nil
+	return errors.Join(errs...)
 }
 
-func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) error {
-	err := s.Start(ctx)
-	if err != nil {
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+}
+
+func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) (err error) {
+	defer func() {
+		cleanup, cancel := cleanupContext(ctx)
+		defer cancel()
+		err = errors.Join(err, s.Stop(cleanup))
+	}()
+	if err := s.Start(ctx); err != nil {
 		return err
 	}
+	// Closing the source connection releases a synchronous incremental read.
+	// Volumes and snapshots are cleaned up by the owning goroutine afterward.
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		for _, server := range s.Servers {
+			if err := server.Nbdkit.Interrupt(); err != nil {
+				log.WithError(err).Error("Failed to interrupt source reader")
+			}
+		}
+	})
 	defer func() {
-		err := s.Stop(ctx)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to stop nbdkit servers")
+		if !stop() {
+			<-done
 		}
 	}()
-
 	if runV2V {
 		return s.migrationCycleWithV2V(ctx)
 	}
-
 	for _, server := range s.Servers {
 		t, err := target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
 		if err != nil {
 			return err
 		}
-
-		err = server.SyncToTarget(ctx, t)
-		if err != nil {
+		if err := server.SyncToTarget(ctx, t); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -244,33 +244,10 @@ func disconnectMigrationTargets(ctx context.Context, targets []*migrationTarget)
 
 func (s *NbdkitServers) migrationCycleWithV2V(ctx context.Context) (err error) {
 	targets := []*migrationTarget{}
-	var targetsMu sync.Mutex
 	defer func() {
-		err = errors.Join(err, disconnectMigrationTargets(ctx, targets))
-	}()
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(c)
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-done:
-			return
-		case <-c:
-		}
-		log.Warn("Received interrupt signal, cleaning up...")
-
-		targetsMu.Lock()
-		interruptedTargets := append([]*migrationTarget(nil), targets...)
-		targetsMu.Unlock()
-		err := disconnectMigrationTargets(ctx, interruptedTargets)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to disconnect from targets")
-		}
-
-		os.Exit(1)
+		cleanup, cancel := cleanupContext(ctx)
+		defer cancel()
+		err = errors.Join(err, disconnectMigrationTargets(cleanup, targets))
 	}()
 
 	for _, server := range s.Servers {
@@ -283,9 +260,7 @@ func (s *NbdkitServers) migrationCycleWithV2V(ctx context.Context) (err error) {
 			Server: server,
 			Target: t,
 		}
-		targetsMu.Lock()
 		targets = append(targets, mt)
-		targetsMu.Unlock()
 
 		if err := mt.connect(ctx); err != nil {
 			return err
@@ -302,7 +277,7 @@ func (s *NbdkitServers) migrationCycleWithV2V(ctx context.Context) (err error) {
 	return s.RunVirtV2VInPlace(ctx, targets)
 }
 
-func (s *NbdkitServer) FullCopyToTarget(t target.Target, path string, targetIsClean bool) error {
+func (s *NbdkitServer) FullCopyToTarget(ctx context.Context, t target.Target, path string, targetIsClean bool) error {
 	logger := log.WithFields(log.Fields{
 		"vm":   s.Servers.VirtualMachine.Name(),
 		"disk": s.Disk.Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName,
@@ -310,7 +285,7 @@ func (s *NbdkitServer) FullCopyToTarget(t target.Target, path string, targetIsCl
 
 	logger.Info("Starting full copy")
 
-	err := nbdcopy.Run(
+	err := nbdcopy.Run(ctx,
 		s.Nbdkit.LibNBDExportName(),
 		path,
 		s.Disk.CapacityInBytes,
@@ -342,6 +317,8 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 	if err != nil {
 		return err
 	}
+
+	defer handle.Close()
 
 	err = handle.ConnectUri(s.Nbdkit.LibNBDExportName())
 	if err != nil {
@@ -375,6 +352,9 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 
 		for _, area := range diskChangeInfo.ChangedArea {
 			for offset := area.Start; offset < area.Start+area.Length; {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				chunkSize := area.Length - (offset - area.Start)
 				if chunkSize > MaxChunkSize {
 					chunkSize = MaxChunkSize
@@ -414,7 +394,7 @@ func (s *NbdkitServer) CopyToTarget(ctx context.Context, t target.Target, path s
 	}
 
 	if needFullCopy {
-		err = s.FullCopyToTarget(t, path, targetIsClean)
+		err = s.FullCopyToTarget(ctx, t, path, targetIsClean)
 		if err != nil {
 			return nil, err
 		}
@@ -434,21 +414,7 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target) error 
 	if err != nil {
 		return err
 	}
-	defer t.Disconnect(ctx)
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		log.Warn("Received interrupt signal, cleaning up...")
-
-		err := t.Disconnect(ctx)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to disconnect from target")
-		}
-
-		os.Exit(1)
-	}()
+	defer func() { cleanup, cancel := cleanupContext(ctx); defer cancel(); t.Disconnect(cleanup) }()
 
 	snapshotChangeId, err := s.CopyToTarget(ctx, t, mt.Path, mt.NeedFullCopy, mt.TargetIsClean)
 	if err != nil {
