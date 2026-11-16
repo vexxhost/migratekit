@@ -13,6 +13,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/thediveo/enumflag/v2 v2.0.7
 	github.com/vmware/govmomi v0.52.0
+	golang.org/x/term v0.28.0
 	libguestfs.org/libnbd v1.22.2-4-g3d7cc461d
 )
 
@@ -39,6 +40,5 @@ require (
 	golang.org/x/exp v0.0.0-20250103183323-7d7fa50e5329 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/term v0.28.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 )
