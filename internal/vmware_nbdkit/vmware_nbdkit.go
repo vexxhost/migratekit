@@ -408,13 +408,17 @@ func (s *NbdkitServer) CopyToTarget(ctx context.Context, t target.Target, path s
 	return snapshotChangeId, nil
 }
 
-func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target) error {
+func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target) (err error) {
 	mt := &migrationTarget{Server: s, Target: t}
-	err := mt.connect(ctx)
+	defer func() {
+		cleanup, cancel := cleanupContext(ctx)
+		defer cancel()
+		err = errors.Join(err, t.Disconnect(cleanup))
+	}()
+	err = mt.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { cleanup, cancel := cleanupContext(ctx); defer cancel(); t.Disconnect(cleanup) }()
 
 	snapshotChangeId, err := s.CopyToTarget(ctx, t, mt.Path, mt.NeedFullCopy, mt.TargetIsClean)
 	if err != nil {
