@@ -50,14 +50,22 @@ func (t *OpenStack) GetDisk() *types.VirtualDisk {
 }
 
 func findDevice(volumeID string) (string, error) {
-	files, err := os.ReadDir("/dev/disk/by-id/")
+	return findDeviceInDir("/dev/disk/by-id", volumeID)
+}
+
+func findDeviceInDir(deviceDir, volumeID string) (string, error) {
+	files, err := os.ReadDir(deviceDir)
+	if errors.Is(err, os.ErrNotExist) {
+		// udev may not create this directory until the first volume appears.
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
 
 	for _, file := range files {
 		if strings.Contains(file.Name(), volumeID[:18]) {
-			devicePath, err := filepath.EvalSymlinks(filepath.Join("/dev/disk/by-id/", file.Name()))
+			devicePath, err := filepath.EvalSymlinks(filepath.Join(deviceDir, file.Name()))
 			if err != nil {
 				return "", err
 			}
