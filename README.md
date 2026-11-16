@@ -71,6 +71,7 @@ to be able to use Migratekit:
 |--------------------------------------------------|--------------------------------------------------------------------|-------------------------------|----------------------------------------------------|
 | Browse datastore                                 | Enable browsing of VM log files for troubleshooting snapshot issues. | Data stores                   | Datastore.Browse                                   |
 | Low level file operations                        | Permit read/write/delete/rename operations in the datastore browser for snapshot troubleshooting. | Data stores                   | Datastore.FileManagement                           |
+| Change Configuration - Advanced configuration | Acquire and release an exclusive per-VM migration lease. | Virtual machines | VirtualMachine.Config.AdvancedConfig |
 | Change Configuration - Toggle disk change tracking | Enable or disable change tracking of VM disks to manage data changes between snapshots. | Virtual machines               | VirtualMachine.Config.ChangeTracking               |
 | Change Configuration - Acquire disk lease        | Allow disk lease operations to read VM disks using the VMware vSphere Virtual Disk Development Kit (VDDK). | Virtual machines               | VirtualMachine.Config.DiskLease                    |
 | Provisioning - Allow read-only disk access       | Enable read-only access to VM disks for data reading using the VDDK. | Virtual machines               | VirtualMachine.Provisioning.DiskRandomRead         |
@@ -232,3 +233,19 @@ any of the commands that you need to run for development.
 If you need help with using Migratekit, you can either open an issue to get
 help from the community or you can contact [VEXXHOST](https://vexxhost.com/contact-us/)
 for professional support with VMware migration or OpenStack.
+
+### Concurrent migrations and stale source leases
+
+Each invocation claims an exclusive source-VM lease before inspecting migration
+snapshots or creating destination resources. The claim uses the VM configuration
+version as a conditional update, so a competing invocation cannot overwrite a
+lease read from an older configuration. The lease remains held through the whole
+command and is released after normal completion, errors and handled interrupts.
+The VMware account needs `VirtualMachine.Config.AdvancedConfig` for this update.
+
+A process kill or machine failure can leave a lease behind. Stop the previous
+migration and verify that its workers have stopped before using the explicit
+`--recover-source-lock` option. Review any existing migration snapshot and volume
+attachments as well. Snapshot recovery and attachment cleanup are separate from
+the lease; this option does not automatically remove either resource. Never use
+recovery to replace a lease held by an active migration.

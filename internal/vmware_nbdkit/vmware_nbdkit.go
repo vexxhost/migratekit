@@ -2,11 +2,12 @@ package vmware_nbdkit
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
-	"os/signal"
 	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vexxhost/migratekit/internal/nbdcopy"
@@ -43,6 +44,28 @@ type NbdkitServer struct {
 	Nbdkit  *nbdkit.NbdkitServer
 }
 
+type migrationTarget struct {
+	Server        *NbdkitServer
+	Target        target.Target
+	Path          string
+	NeedFullCopy  bool
+	TargetIsClean bool
+}
+
+func (mt *migrationTarget) connect(ctx context.Context) error {
+	var err error
+	// Capture freshness before Connect can create the destination volume.
+	mt.NeedFullCopy, mt.TargetIsClean, err = target.NeedsFullCopy(ctx, mt.Target)
+	if err != nil {
+		return err
+	}
+	if err := mt.Target.Connect(ctx); err != nil {
+		return err
+	}
+	mt.Path, err = mt.Target.GetPath(ctx)
+	return err
+}
+
 func NewNbdkitServers(vddk *VddkConfig, vm *object.VirtualMachine) *NbdkitServers {
 	return &NbdkitServers{
 		VddkConfig:     vddk,
@@ -65,12 +88,27 @@ func (s *NbdkitServers) createSnapshot(ctx context.Context) error {
 	defer cancel()
 
 	info, err := task.WaitForResult(ctx, bar)
-	if err != nil {
-		return err
+	waitErr := errors.Join(err, ctx.Err())
+	if waitErr != nil || info == nil || info.Result == nil {
+		// Cancellation does not cancel the task already accepted by vCenter.
+		// Recover its reference so the cycle's cleanup can remove the snapshot.
+		cleanup, stop := cleanupContext(ctx)
+		defer stop()
+		var recoveryErr error
+		info, recoveryErr = task.WaitForResult(cleanup)
+		if recoveryErr != nil {
+			return errors.Join(waitErr, fmt.Errorf("recovering snapshot task result: %w", recoveryErr))
+		}
 	}
-
-	s.SnapshotRef = info.Result.(types.ManagedObjectReference)
-	return nil
+	if info == nil {
+		return errors.Join(waitErr, errors.New("snapshot task returned no result"))
+	}
+	ref, ok := info.Result.(types.ManagedObjectReference)
+	if !ok || ref.Value == "" {
+		return errors.Join(waitErr, errors.New("snapshot task returned no snapshot reference"))
+	}
+	s.SnapshotRef = ref
+	return waitErr
 }
 
 func (s *NbdkitServers) Start(ctx context.Context) error {
@@ -118,20 +156,6 @@ func (s *NbdkitServers) Start(ctx context.Context) error {
 		}
 	}
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		log.Warn("Received interrupt signal, cleaning up...")
-
-		err := s.Stop(ctx)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to stop nbdkit servers")
-		}
-
-		os.Exit(1)
-	}()
-
 	return nil
 }
 
@@ -158,52 +182,118 @@ func (s *NbdkitServers) removeSnapshot(ctx context.Context) error {
 }
 
 func (s *NbdkitServers) Stop(ctx context.Context) error {
+	var errs []error
 	for _, server := range s.Servers {
 		if err := server.Nbdkit.Stop(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if s.SnapshotRef.Value != "" {
+		if err := s.removeSnapshot(ctx); err != nil {
+			errs = append(errs, err)
+		} else {
+			s.SnapshotRef = types.ManagedObjectReference{}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+}
+
+func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) (err error) {
+	defer func() {
+		cleanup, cancel := cleanupContext(ctx)
+		defer cancel()
+		err = errors.Join(err, s.Stop(cleanup))
+	}()
+	if err := s.Start(ctx); err != nil {
+		return err
+	}
+	// Closing the source connection releases a synchronous incremental read.
+	// Volumes and snapshots are cleaned up by the owning goroutine afterward.
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		for _, server := range s.Servers {
+			if err := server.Nbdkit.Interrupt(); err != nil {
+				log.WithError(err).Error("Failed to interrupt source reader")
+			}
+		}
+	})
+	defer func() {
+		if !stop() {
+			<-done
+		}
+	}()
+	if runV2V {
+		return s.migrationCycleWithV2V(ctx)
+	}
+	for _, server := range s.Servers {
+		t, err := target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
+		if err != nil {
+			return err
+		}
+		if err := server.SyncToTarget(ctx, t); err != nil {
 			return err
 		}
 	}
-
-	err := s.removeSnapshot(ctx)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
-func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) error {
-	err := s.Start(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err := s.Stop(ctx)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to stop nbdkit servers")
+func disconnectMigrationTargets(ctx context.Context, targets []*migrationTarget) error {
+	var errs []error
+
+	for _, mt := range targets {
+		if mt.Target == nil {
+			continue
 		}
+
+		if err := mt.Target.Disconnect(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (s *NbdkitServers) migrationCycleWithV2V(ctx context.Context) (err error) {
+	targets := []*migrationTarget{}
+	defer func() {
+		cleanup, cancel := cleanupContext(ctx)
+		defer cancel()
+		err = errors.Join(err, disconnectMigrationTargets(cleanup, targets))
 	}()
 
-	for index, server := range s.Servers {
+	for _, server := range s.Servers {
 		t, err := target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
 		if err != nil {
 			return err
 		}
 
-		if index != 0 {
-			runV2V = false
+		mt := &migrationTarget{
+			Server: server,
+			Target: t,
 		}
+		targets = append(targets, mt)
 
-		err = server.SyncToTarget(ctx, t, runV2V)
+		if err := mt.connect(ctx); err != nil {
+			return err
+		}
+	}
+
+	for _, mt := range targets {
+		_, err := mt.Server.CopyToTarget(ctx, mt.Target, mt.Path, mt.NeedFullCopy, mt.TargetIsClean)
 		if err != nil {
 			return err
 		}
 	}
 
-	return nil
+	return s.RunVirtV2VInPlace(ctx, targets)
 }
 
-func (s *NbdkitServer) FullCopyToTarget(t target.Target, path string, targetIsClean bool) error {
+func (s *NbdkitServer) FullCopyToTarget(ctx context.Context, t target.Target, path string, targetIsClean bool) error {
 	logger := log.WithFields(log.Fields{
 		"vm":   s.Servers.VirtualMachine.Name(),
 		"disk": s.Disk.Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName,
@@ -211,7 +301,7 @@ func (s *NbdkitServer) FullCopyToTarget(t target.Target, path string, targetIsCl
 
 	logger.Info("Starting full copy")
 
-	err := nbdcopy.Run(
+	err := nbdcopy.Run(ctx,
 		s.Nbdkit.LibNBDExportName(),
 		path,
 		s.Disk.CapacityInBytes,
@@ -243,6 +333,8 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 	if err != nil {
 		return err
 	}
+
+	defer handle.Close()
 
 	err = handle.ConnectUri(s.Nbdkit.LibNBDExportName())
 	if err != nil {
@@ -276,6 +368,9 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 
 		for _, area := range diskChangeInfo.ChangedArea {
 			for offset := area.Start; offset < area.Start+area.Length; {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				chunkSize := area.Length - (offset - area.Start)
 				if chunkSize > MaxChunkSize {
 					chunkSize = MaxChunkSize
@@ -308,83 +403,43 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 	return nil
 }
 
-func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V bool) error {
+func (s *NbdkitServer) CopyToTarget(ctx context.Context, t target.Target, path string, needFullCopy, targetIsClean bool) (*vmware.ChangeID, error) {
 	snapshotChangeId, err := vmware.GetChangeID(s.Disk)
 	if err != nil {
-		return err
-	}
-
-	needFullCopy, targetIsClean, err := target.NeedsFullCopy(ctx, t)
-	if err != nil {
-		return err
-	}
-
-	err = t.Connect(ctx)
-	if err != nil {
-		return err
-	}
-	defer t.Disconnect(ctx)
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		log.Warn("Received interrupt signal, cleaning up...")
-
-		err := t.Disconnect(ctx)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to disconnect from target")
-		}
-
-		os.Exit(1)
-	}()
-
-	path, err := t.GetPath(ctx)
-	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if needFullCopy {
-		err = s.FullCopyToTarget(t, path, targetIsClean)
+		err = s.FullCopyToTarget(ctx, t, path, targetIsClean)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		err = s.IncrementalCopyToTarget(ctx, t, path)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	if runV2V {
-		log.Info("Running virt-v2v-in-place")
+	return snapshotChangeId, nil
+}
 
-		os.Setenv("LIBGUESTFS_BACKEND", "direct")
+func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target) error {
+	mt := &migrationTarget{Server: s, Target: t}
+	err := mt.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { cleanup, cancel := cleanupContext(ctx); defer cancel(); t.Disconnect(cleanup) }()
 
-		var cmd *exec.Cmd
-		if s.Servers.VddkConfig.Debug {
-			cmd = exec.Command("virt-v2v-in-place", "-v", "-x", "-i", "disk", path)
-		} else {
-			cmd = exec.Command("virt-v2v-in-place", "-i", "disk", path)
-		}
+	snapshotChangeId, err := s.CopyToTarget(ctx, t, mt.Path, mt.NeedFullCopy, mt.TargetIsClean)
+	if err != nil {
+		return err
+	}
 
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		err := cmd.Run()
-		if err != nil {
-			return err
-		}
-
-		err = t.WriteChangeID(ctx, &vmware.ChangeID{})
-		if err != nil {
-			return err
-		}
-	} else {
-		err = t.WriteChangeID(ctx, snapshotChangeId)
-		if err != nil {
-			return err
-		}
+	err = t.WriteChangeID(ctx, snapshotChangeId)
+	if err != nil {
+		return err
 	}
 
 	return nil
