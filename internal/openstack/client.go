@@ -16,6 +16,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	log "github.com/sirupsen/logrus"
 	"github.com/vexxhost/migratekit/cmd"
+	"github.com/vexxhost/migratekit/internal/vmware"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
@@ -255,10 +256,10 @@ func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *ob
 	}
 
 	var blockDevices []servers.BlockDevice
-	disks := devices.SelectByType((*types.VirtualDisk)(nil))
+	disks := vmware.DisksInBootOrder(devices, o.Config.BootOptions)
 	diskIndex := 0
 	for _, disk := range disks {
-		vd := disk.(*types.VirtualDisk)
+		vd := disk
 		volume, err := c.GetVolumeForDisk(ctx, vm, vd)
 		if err != nil {
 			return err

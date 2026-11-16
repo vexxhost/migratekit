@@ -80,42 +80,39 @@ func (s *NbdkitServers) Start(ctx context.Context) error {
 	}
 
 	var snapshot mo.VirtualMachineSnapshot
-	err = s.VirtualMachine.Properties(ctx, s.SnapshotRef, []string{"config.hardware"}, &snapshot)
+	err = s.VirtualMachine.Properties(ctx, s.SnapshotRef, []string{"config.hardware", "config.bootOptions"}, &snapshot)
 	if err != nil {
 		return err
 	}
 
-	for _, device := range snapshot.Config.Hardware.Device {
-		switch disk := device.(type) {
-		case *types.VirtualDisk:
-			backing := disk.Backing.(types.BaseVirtualDeviceFileBackingInfo)
-			info := backing.GetVirtualDeviceFileBackingInfo()
+	for _, disk := range vmware.DisksInBootOrder(snapshot.Config.Hardware.Device, snapshot.Config.BootOptions) {
+		backing := disk.Backing.(types.BaseVirtualDeviceFileBackingInfo)
+		info := backing.GetVirtualDeviceFileBackingInfo()
 
-			password, _ := s.VddkConfig.Endpoint.User.Password()
-			server, err := nbdkit.NewNbdkitBuilder().
-				Server(s.VddkConfig.Endpoint.Host).
-				Username(s.VddkConfig.Endpoint.User.Username()).
-				Password(password).
-				Thumbprint(s.VddkConfig.Thumbprint).
-				VirtualMachine(s.VirtualMachine.Reference().Value).
-				Snapshot(s.SnapshotRef.Value).
-				Filename(info.FileName).
-				Compression(s.VddkConfig.Compression).
-				Build()
-			if err != nil {
-				return err
-			}
-
-			if err := server.Start(); err != nil {
-				return err
-			}
-
-			s.Servers = append(s.Servers, &NbdkitServer{
-				Servers: s,
-				Disk:    disk,
-				Nbdkit:  server,
-			})
+		password, _ := s.VddkConfig.Endpoint.User.Password()
+		server, err := nbdkit.NewNbdkitBuilder().
+			Server(s.VddkConfig.Endpoint.Host).
+			Username(s.VddkConfig.Endpoint.User.Username()).
+			Password(password).
+			Thumbprint(s.VddkConfig.Thumbprint).
+			VirtualMachine(s.VirtualMachine.Reference().Value).
+			Snapshot(s.SnapshotRef.Value).
+			Filename(info.FileName).
+			Compression(s.VddkConfig.Compression).
+			Build()
+		if err != nil {
+			return err
 		}
+
+		if err := server.Start(); err != nil {
+			return err
+		}
+
+		s.Servers = append(s.Servers, &NbdkitServer{
+			Servers: s,
+			Disk:    disk,
+			Nbdkit:  server,
+		})
 	}
 
 	c := make(chan os.Signal, 1)
