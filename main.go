@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/erikgeiser/promptkit/confirmation"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
@@ -57,22 +60,23 @@ var CompressionMethodOptsIds = map[CompressionMethodOpts][]string{
 }
 
 var (
-	debug                bool
-	endpoint             string
-	username             string
-	password             string
-	path                 string
-	compressionMethod    CompressionMethodOpts = Skipz
-	flavorId             string
-	networkMapping       cmd.NetworkMappingFlag
-	availabilityZone     string
-	volumeType           string
-	securityGroups       []string
-	enablev2v            bool
-	busType              BusTypeOpts
-	vzUnsafeVolumeByName bool
-	osType               string
-    enableQemuGuestAgent bool
+	debug                  bool
+	endpoint               string
+	username               string
+	password               string
+	path                   string
+	compressionMethod      CompressionMethodOpts = Skipz
+	flavorId               string
+	networkMapping         cmd.NetworkMappingFlag
+	availabilityZone       string
+	volumeType             string
+	securityGroups         []string
+	enablev2v              bool
+	busType                BusTypeOpts
+	vzUnsafeVolumeByName   bool
+	deleteExistingSnapshot bool
+	osType                 string
+	enableQemuGuestAgent   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -157,24 +161,8 @@ var rootCmd = &cobra.Command{
 			return errors.New("change tracking is not enabled on the virtual machine")
 		}
 
-		if snapshotRef, _ := vm.FindSnapshot(ctx, "migratekit"); snapshotRef != nil {
-			log.Info("Snapshot already exists")
-
-			input := confirmation.New("Delete existing snapshot?", confirmation.Undecided)
-			delete, err := input.RunPrompt()
-			if err != nil {
-				return err
-			}
-
-			if delete {
-				consolidate := true
-				_, err := vm.RemoveSnapshot(ctx, snapshotRef.Value, false, &consolidate)
-				if err != nil {
-					return err
-				}
-			} else {
-				return errors.New("unable to continue without deleting existing snapshot")
-			}
+		if err := prepareMigrationSnapshot(ctx, vm, deleteExistingSnapshot, confirmSnapshotRemoval); err != nil {
+			return err
 		}
 
 		ctx = context.WithValue(ctx, "vm", vm)
@@ -326,6 +314,8 @@ var cutoverCmd = &cobra.Command{
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVar(&deleteExistingSnapshot, "delete-existing-snapshot", false, "Delete and consolidate an existing migratekit snapshot after the previous migration has stopped")
+
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging")
 
 	rootCmd.PersistentFlags().StringVar(&endpoint, "vmware-endpoint", "", "VMware endpoint (hostname or IP only)")
@@ -350,9 +340,9 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&vzUnsafeVolumeByName, "vz-unsafe-volume-by-name", false, "Only use the name to find a volume - workaround for virtuozzu - dangerous option")
 
-    rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
+	rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
 
-    rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
+	rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")
@@ -375,4 +365,56 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func confirmSnapshotRemoval() (bool, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return false, errors.New("source has an existing migratekit snapshot: stop the previous migration, review the snapshot, then use --delete-existing-snapshot to remove it or clean it up manually")
+	}
+	return confirmation.New("Delete existing snapshot?", confirmation.Undecided).RunPrompt()
+}
+
+func prepareMigrationSnapshot(ctx context.Context, vm *object.VirtualMachine, allowDelete bool, confirm func() (bool, error)) error {
+	var state mo.VirtualMachine
+	if err := vm.Properties(ctx, vm.Reference(), []string{"snapshot"}, &state); err != nil {
+		return err
+	}
+	if state.Snapshot == nil {
+		return nil
+	}
+	var refs []types.ManagedObjectReference
+	var collect func([]types.VirtualMachineSnapshotTree)
+	collect = func(trees []types.VirtualMachineSnapshotTree) {
+		for _, tree := range trees {
+			if tree.Name == "migratekit" {
+				refs = append(refs, tree.Snapshot)
+			}
+			collect(tree.ChildSnapshotList)
+		}
+	}
+	collect(state.Snapshot.RootSnapshotList)
+	if len(refs) == 0 {
+		return nil
+	}
+	if len(refs) > 1 {
+		return errors.New("multiple migratekit snapshots exist: review and remove the intended snapshots manually before retrying")
+	}
+	if !allowDelete {
+		accepted, err := confirm()
+		if err != nil {
+			return err
+		}
+		if !accepted {
+			return errors.New("unable to continue without deleting existing snapshot")
+		}
+	}
+	consolidate := true
+	task, err := vm.RemoveSnapshot(ctx, refs[0].Value, false, &consolidate)
+	if err != nil {
+		return err
+	}
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("waiting for existing snapshot removal: %w", err)
+	}
+	return nil
 }

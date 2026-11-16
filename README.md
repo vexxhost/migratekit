@@ -232,3 +232,14 @@ any of the commands that you need to run for development.
 If you need help with using Migratekit, you can either open an issue to get
 help from the community or you can contact [VEXXHOST](https://vexxhost.com/contact-us/)
 for professional support with VMware migration or OpenStack.
+
+### Recovering an interrupted migration
+
+An abrupt process exit can leave a VMware snapshot named `migratekit`. In a
+noninteractive invocation, review the snapshot and stop the previous migration
+before retrying with `--delete-existing-snapshot`. This explicit option removes
+one matching snapshot and waits for consolidation to complete before starting
+another migration cycle. Other snapshots and child snapshots are preserved.
+Multiple matching snapshots require manual review and cleanup. Review target
+volume attachments separately before retrying. Interactive invocations retain
+the confirmation prompt when the option is omitted.
