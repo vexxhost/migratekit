@@ -232,3 +232,23 @@ any of the commands that you need to run for development.
 If you need help with using Migratekit, you can either open an issue to get
 help from the community or you can contact [VEXXHOST](https://vexxhost.com/contact-us/)
 for professional support with VMware migration or OpenStack.
+
+### Legacy Windows VMware Tools preparation
+
+The VMware Tools uninstaller on Windows Server 2012 R2 can fail after conversion
+with Windows Installer error 1603, leaving VMware services installed. Driver
+compatibility and VMware Tools removal are separate checks.
+
+If this occurs, remove VMware Tools with its supported Windows uninstaller while
+the guest still runs on VMware, and complete any restart required by that
+installer. Confirm that the guest boots and its disks and management access work
+before proceeding with the final migration.
+
+Migratekit normally requests guest shutdown through VMware Tools. After removing
+Tools, shut down the source from inside Windows and verify that vSphere reports
+it as powered off before running `cutover`. Keep the source powered off while
+the destination boots, then check disk access, networking, the guest agent, and
+application data on the destination.
+
+A successful migration or boot does not by itself prove that VMware Tools was
+removed. Check the installed applications and VMware services after conversion.
