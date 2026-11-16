@@ -82,6 +82,20 @@ to be able to use Migratekit:
 
 ### Running Migratekit
 
+To qualify a particular VirtIO driver package for Windows guests, select its
+RPM when building the image. This keeps the Fedora and virt-v2v versions
+unchanged:
+
+```bash
+docker build \
+  --build-arg VIRTIO_WIN_PACKAGE=https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.271-1/virtio-win-0.1.271-1.noarch.rpm \
+  -t migratekit:virtio-0.1.271 .
+```
+
+The default uses the `virtio-win` package from the configured repository.
+Validate Windows boot, first-boot driver installation, and disk and network
+access with the selected package before using it for migrations.
+
 Assuming that you already have Docker installed on your system, you can use the
 following command to run the Migratekit Docker container:
 
