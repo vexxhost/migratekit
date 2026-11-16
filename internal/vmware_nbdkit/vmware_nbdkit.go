@@ -3,6 +3,7 @@ package vmware_nbdkit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"syscall"
@@ -87,12 +88,27 @@ func (s *NbdkitServers) createSnapshot(ctx context.Context) error {
 	defer cancel()
 
 	info, err := task.WaitForResult(ctx, bar)
-	if err != nil {
-		return err
+	waitErr := errors.Join(err, ctx.Err())
+	if waitErr != nil || info == nil || info.Result == nil {
+		// Cancellation does not cancel the task already accepted by vCenter.
+		// Recover its reference so the cycle's cleanup can remove the snapshot.
+		cleanup, stop := cleanupContext(ctx)
+		defer stop()
+		var recoveryErr error
+		info, recoveryErr = task.WaitForResult(cleanup)
+		if recoveryErr != nil {
+			return errors.Join(waitErr, fmt.Errorf("recovering snapshot task result: %w", recoveryErr))
+		}
 	}
-
-	s.SnapshotRef = info.Result.(types.ManagedObjectReference)
-	return nil
+	if info == nil {
+		return errors.Join(waitErr, errors.New("snapshot task returned no result"))
+	}
+	ref, ok := info.Result.(types.ManagedObjectReference)
+	if !ok || ref.Value == "" {
+		return errors.Join(waitErr, errors.New("snapshot task returned no snapshot reference"))
+	}
+	s.SnapshotRef = ref
+	return waitErr
 }
 
 func (s *NbdkitServers) Start(ctx context.Context) error {
