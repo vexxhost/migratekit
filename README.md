@@ -34,6 +34,12 @@ OpenStack cloud using the same volumes as the original virtual machine.
 
 ## Usage
 
+For guests that use cloud-init, `cutover --config-drive` supplies destination
+metadata and network configuration on a local config drive. This can help
+multi-interface guests obtain the correct configuration before DHCP and the
+network metadata service are available, including when a secondary network
+has DHCP disabled. The guest must support the OpenStack ConfigDrive datasource.
+
 The easiest supported way of running Migratekit is by using the Docker image
 which is shipped with all of the dependencies required to run Migratekit except
 for the [VMware Disk Development Kit (VDDK)](https://developer.broadcom.com/sdks/vmware-virtual-disk-development-kit-vddk/8.0) which you will need to download

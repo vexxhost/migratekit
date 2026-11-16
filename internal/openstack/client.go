@@ -242,7 +242,7 @@ func (c *ClientSet) EnsurePortsForVirtualMachine(ctx context.Context, vm *object
 	return networks, nil
 }
 
-func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *object.VirtualMachine, flavor string, networks []servers.Network, availabilityZone string) error {
+func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *object.VirtualMachine, flavor string, networks []servers.Network, availabilityZone string, configDrive bool) error {
 	var o mo.VirtualMachine
 	err := vm.Properties(ctx, vm.Reference(), []string{"config"}, &o)
 	if err != nil {
@@ -279,6 +279,7 @@ func (c *ClientSet) CreateResourcesForVirtualMachine(ctx context.Context, vm *ob
 		Networks:         networks,
 		BlockDevice:      blockDevices,
 		AvailabilityZone: availabilityZone,
+		ConfigDrive:      &configDrive,
 	}, servers.SchedulerHintOpts{}).Extract()
 	if err != nil {
 		return err
