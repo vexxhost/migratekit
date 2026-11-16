@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -357,29 +356,7 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 	}
 
 	if runV2V {
-		log.Info("Running virt-v2v-in-place")
-
-		os.Setenv("LIBGUESTFS_BACKEND", "direct")
-
-		var cmd *exec.Cmd
-		if s.Servers.VddkConfig.Debug {
-			cmd = exec.Command("virt-v2v-in-place", "-v", "-x", "-i", "disk", path)
-		} else {
-			cmd = exec.Command("virt-v2v-in-place", "-i", "disk", path)
-		}
-
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		err := cmd.Run()
-		if err != nil {
-			return err
-		}
-
-		err = t.WriteChangeID(ctx, &vmware.ChangeID{})
-		if err != nil {
-			return err
-		}
+		return s.convertTarget(ctx, t, path)
 	} else {
 		err = t.WriteChangeID(ctx, snapshotChangeId)
 		if err != nil {
