@@ -82,6 +82,58 @@ to be able to use Migratekit:
 
 ### Running Migratekit
 
+To qualify a particular VirtIO driver package for Windows guests, select its
+RPM when building the image. This keeps the Fedora and virt-v2v versions
+unchanged:
+
+```bash
+docker build \
+  --build-arg VIRTIO_WIN_PACKAGE=https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.271-1/virtio-win-0.1.271-1.noarch.rpm \
+  -t migratekit:virtio-0.1.271 .
+```
+
+The default uses the `virtio-win` package from the configured repository.
+Validate Windows boot, first-boot driver installation, and disk and network
+access with the selected package before using it for migrations.
+
+For Windows Server 2012 R2, build the explicit compatibility image:
+
+```bash
+bash scripts/build-windows2012r2.sh
+# Or provide a custom image tag:
+bash scripts/build-windows2012r2.sh migratekit:my-windows2012r2
+```
+
+This profile selects `virtio-win-0.1.190-1`. The 2012 R2 boot driver in the
+inspected 0.1.285 package is signed by a self-signed development certificate;
+Windows rejects it with boot status `0xc0000428`. The older package supplies
+drivers whose Authenticode signatures Windows Server 2012 R2 verifies. Keep
+Windows signature enforcement enabled when using this profile.
+
+Before copying the source guest, mount the matching 0.1.190 driver ISO, copy
+the preparation script to that guest, and run it as Administrator. For example,
+if its CD drive is `D:`:
+
+```powershell
+.\scripts\prepare-windows2012r2.ps1 -DriverDirectory 'D:\viostor\2k12R2\amd64'
+```
+
+Legacy driver installation also needs the publisher in Windows' Trusted
+Publishers store to run unattended. This script first requires valid
+Authenticode signatures on the boot driver and catalog and checks the exact
+qualified publisher certificate's SHA-256 fingerprint. It then adds only that
+certificate to Local Machine Trusted Publishers. It rejects development
+certificates, imports no root certificates, and changes no signature-enforcement
+settings. Without this preparation, firstboot can repeatedly fail with
+"The publisher of an Authenticode(tm) signed catalog has not yet been
+established as trusted." See [Microsoft's Trusted Publishers documentation](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/trusted-publishers-certificate-store).
+
+Use this image for the qualified Server 2012 R2 workload and keep the current
+default image for newer Windows releases. The legacy package does not include
+the drivers for Server 2022 or Server 2025. Other Migratekit fixes are separate
+from this package selection; qualify full copy, incremental replication,
+cutover, firstboot, networking and data integrity with the complete build.
+
 Assuming that you already have Docker installed on your system, you can use the
 following command to run the Migratekit Docker container:
 
