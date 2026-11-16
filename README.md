@@ -125,6 +125,27 @@ You will also need to make sure you have all of your OpenStack environment varia
 set in your environment before running the command so that Migratekit can connect
 to the OpenStack cloud.
 
+### OpenStack service endpoint interface
+
+Set `OS_INTERFACE` to select the service catalog interface used for Cinder, Nova
+and Neutron API requests. Valid values are `public`, `internal` and `admin`.
+When the variable is unset or empty, Migratekit uses `public` for backward
+compatibility. Unsupported values are rejected before OpenStack authentication.
+
+For example, if the worker can reach the internal API endpoints, set:
+
+```bash
+export OS_INTERFACE=internal
+```
+
+Pass this variable into the container using the `--env-file` option shown above,
+or add `-e OS_INTERFACE=internal` before the image name. The selected endpoints
+must exist in the service catalog for `OS_REGION_NAME` and be reachable from the
+worker. This setting selects service API endpoints independently of
+`OS_AUTH_URL`, which still specifies the Keystone authentication address.
+
+### Running cutover
+
 Once you've ran this command a few times and you're happy that you're ready to
 cutover, you can run the following command to cutover to the OpenStack cloud:
 
