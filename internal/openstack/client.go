@@ -39,6 +39,9 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 		return nil, err
 	}
 
+	// A disk copy can outlive the initial authentication token.
+	opts.AllowReauth = true
+
 	provider, err := openstack.NewClient(opts.IdentityEndpoint)
 	if err != nil {
 		return nil, err
