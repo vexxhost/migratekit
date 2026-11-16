@@ -238,7 +238,7 @@ func requestedOSType(option, guestID string) string {
 }
 
 func (t *OpenStack) reconcileOSType(ctx context.Context, volume *volumes.Volume) error {
-	option := ctx.Value("osType").(string)
+	option, _ := ctx.Value("osType").(string)
 	if option == "" {
 		return nil
 	}
