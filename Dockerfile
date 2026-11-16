@@ -7,9 +7,10 @@ COPY . .
 RUN go build -o /migratekit main.go
 
 FROM fedora:44
+ARG VIRTIO_WIN_PACKAGE=virtio-win
 ADD https://fedorapeople.org/groups/virt/virtio-win/virtio-win.repo /etc/yum.repos.d/virtio-win.repo
 RUN \
-  dnf install --refresh -y nbdkit nbdkit-vddk-plugin libnbd virt-v2v virtio-win && \
+  dnf install --refresh -y nbdkit nbdkit-vddk-plugin libnbd virt-v2v "$VIRTIO_WIN_PACKAGE" && \
   dnf clean all && \
   rm -rf /var/cache/dnf
 COPY --from=build /migratekit /usr/local/bin/migratekit
