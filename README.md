@@ -34,10 +34,9 @@ OpenStack cloud using the same volumes as the original virtual machine.
 
 ## Usage
 
-The easiest supported way of running Migratekit is by using the Docker image
-which is shipped with all of the dependencies required to run Migratekit except
-for the [VMware Disk Development Kit (VDDK)](https://developer.broadcom.com/sdks/vmware-virtual-disk-development-kit-vddk/8.0) which you will need to download
-from the VMware website.
+The easiest supported way of running Migratekit is by using the Docker image,
+which bundles OpenVDDK and needs no separate VDDK download or library volume
+mount.
 
 > [!NOTE]
 > At the moment, Migratekit only supports VMware hypervisors that expose an API
@@ -48,19 +47,56 @@ from the VMware website.
 > Error: ServerFaultCode: Current license or ESXi version prohibits execution of the requested operation.
 > ```
 
-### Installing VDDK
+### Using OpenVDDK
 
-In order to be able to use Migratekit, you will need to download the VDDK from
-the VMware website.  You will need to create a developer account in order to
+[OpenVDDK](https://github.com/openvddk/openvddk) is an independent, Apache-2.0
+implementation of the VDDK read interface. The default `main` image bundles
+OpenVDDK 0.7.4 for Linux x86-64, with a pinned release checksum. It uses the
+existing nbdkit VDDK plugin for full copies and CBT incremental replication.
+
+The migration and cutover commands below use the bundled library automatically.
+Mounting another library at `/usr/lib64/vmware-vix-disklib` overrides the bundled
+copy; only do this when choosing to use VMware VDDK instead.
+
+OpenVDDK's network reads require
+`VirtualMachine.Provisioning.GetVmFiles` (Allow virtual machine download) for
+NFC tickets, plus `Datastore.Browse` and `Datastore.FileManagement` for disk
+descriptors. These permissions are included in the account table below.
+
+To build the default image locally with Docker BuildKit:
+
+```bash
+docker buildx build --platform linux/amd64 --load -t migratekit:local .
+```
+
+The bundled kit, including its license, notices, SBOM and administrative tool,
+is under `/usr/lib64/vmware-vix-disklib/`. Its `lib64` link points to the kit's
+`lib` directory, matching the library layout expected by nbdkit.
+
+Migratekit uses NBDSSL with NBD as a fallback; OpenVDDK uses only those supported
+transports from Migratekit's transport list. For NBDSSL, the ESXi certificate
+must match the NFC ticket's thumbprint. NBD sends disk data without encryption.
+Local VMDK file access, SAN transport and writing source disks are unsupported
+by OpenVDDK. This image does not enable HotAdd. See the upstream
+[requirements and known differences](https://github.com/openvddk/openvddk/blob/v0.7.4/evalkit/KNOWN-DIFFERENCES.md)
+before choosing the library for a migration.
+
+### Using VMware VDDK instead (optional)
+
+To use VMware VDDK instead of the bundled OpenVDDK, download it from
+the VMware website. You will need to create a developer account in order to
 download the VDDK as well as accept the EULA.
 
 1. Download [VMware Virtual Disk Development Kit (VDDK) 8.0.2 for Linux](https://developer.broadcom.com/sdks/vmware-virtual-disk-development-kit-vddk/8.0)
 2. Once you've downloaded the file, you will need to extract the contents of the
    tarball to a directory on your system.
 3. We recommend that you extract the contents of the tarball to `/usr/lib64/vmware-vix-disklib/`
-   on your system.  If you decide to extract the contents to a different directory,
-   you will need to update the Docker volume mount in the next section to reflect
-   the directory you extracted the tarball to.
+   on your system. Add the following Docker option to override the bundled
+   library, adjusting the host path if you extracted it elsewhere:
+
+   ```bash
+   -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro
+   ```
 
 ### Configuring account for Migratekit
 
@@ -93,7 +129,6 @@ following command to run the Migratekit Docker container:
 docker run -it --rm --privileged \
   --network host \
   -v /dev:/dev \
-  -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
   ghcr.io/vexxhost/migratekit:main \
   --help
@@ -106,7 +141,6 @@ it with the following command:
 docker run -it --rm --privileged \
   --network host \
   -v /dev:/dev \
-  -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
   ghcr.io/vexxhost/migratekit:main \
   migrate \
@@ -132,7 +166,6 @@ cutover, you can run the following command to cutover to the OpenStack cloud:
 docker run -it --rm --privileged \
   --network host \
   -v /dev:/dev \
-  -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   --env-file <(env | grep OS_) \
   ghcr.io/vexxhost/migratekit:main \
   cutover \
@@ -211,10 +244,9 @@ command to run a development environment for Migratekit:
 docker run -it --rm --privileged \
   --network host \
   -v /dev:/dev \
-  -v /usr/lib64/vmware-vix-disklib/:/usr/lib64/vmware-vix-disklib:ro \
   -v $(pwd):/app \
   --entrypoint /bin/bash \
-  fedora:40
+  ghcr.io/vexxhost/migratekit:main
 ```
 
 Once you've launched this, it's recommended to add all of the development headers
