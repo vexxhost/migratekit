@@ -32,6 +32,29 @@ exist on the cloud, do a final sync of the virtual machine, power it off inside
 of VMware, execute a final sync, and then build a new virtual machine on the
 OpenStack cloud using the same volumes as the original virtual machine.
 
+### Protect the migration runner's root disk
+
+Replication attaches destination volumes to the machine running Migratekit and
+copies complete guest disks onto them. These copies retain the guest's partition
+and filesystem identifiers, including labels and UUIDs. A Linux runner that
+selects its root filesystem by an identifier also present on a copied guest disk
+can boot that guest filesystem after a restart. Running Migratekit in Docker
+does not isolate the host from the attached disks.
+
+Before migrating Linux guests, ensure that the runner's bootloader, initramfs,
+and `/etc/fstab` select its own root filesystem unambiguously while copied disks
+are attached. Use identifiers unique to the runner or a stable device path
+provided by its platform. Check both labels and UUIDs; choosing another disk
+cloned from the same image does not necessarily give it a different identity.
+Keep the guest's copied filesystem identifiers intact for its own boot.
+
+If a runner starts the copied guest filesystem, stop the runner and confirm that
+its previous migration workers have stopped. Identify and detach only the
+replication volumes attached to that runner, then boot its own root disk and
+correct its root-device selection before resuming migration. Keep the replication
+volumes for recovery; detaching them does not require deleting their data. Resume
+snapshot and source-lock recovery only after the previous worker has stopped.
+
 ## Usage
 
 The easiest supported way of running Migratekit is by using the Docker image
