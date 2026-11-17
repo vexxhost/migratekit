@@ -176,6 +176,10 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 		return err
 	}
 
+	if err := t.ensureGuestAgentMetadata(ctx, volume.ID); err != nil {
+		return err
+	}
+
 	log.WithFields(log.Fields{
 		"volume_id": volume.ID,
 	}).Info("Attaching volume")
