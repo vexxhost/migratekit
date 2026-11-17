@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.6
+
 FROM fedora:44 AS build
 RUN dnf install -y golang libnbd-devel
 WORKDIR /src
