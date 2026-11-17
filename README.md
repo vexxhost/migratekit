@@ -34,10 +34,10 @@ OpenStack cloud using the same volumes as the original virtual machine.
 
 ## Usage
 
-The easiest supported way of running Migratekit is by using the Docker image
-which is shipped with all of the dependencies required to run Migratekit except
-for the [VMware Disk Development Kit (VDDK)](https://developer.broadcom.com/sdks/vmware-virtual-disk-development-kit-vddk/8.0) which you will need to download
-from the VMware website.
+The easiest supported way of running Migratekit is by using the Docker image.
+The default image requires an external
+[VMware Disk Development Kit (VDDK)](https://developer.broadcom.com/sdks/vmware-virtual-disk-development-kit-vddk/8.0).
+An optional image bundles OpenVDDK and needs no separate VDDK download.
 
 > [!NOTE]
 > At the moment, Migratekit only supports VMware hypervisors that expose an API
@@ -48,10 +48,46 @@ from the VMware website.
 > Error: ServerFaultCode: Current license or ESXi version prohibits execution of the requested operation.
 > ```
 
-### Installing VDDK
+### Using OpenVDDK
 
-In order to be able to use Migratekit, you will need to download the VDDK from
-the VMware website.  You will need to create a developer account in order to
+[OpenVDDK](https://github.com/openvddk/openvddk) is an independent, Apache-2.0
+implementation of the VDDK read interface. The `main-openvddk` image bundles
+OpenVDDK 0.7.4 for Linux x86-64, with a pinned release checksum. It uses the
+existing nbdkit VDDK plugin for full copies and CBT incremental replication.
+
+Use `ghcr.io/vexxhost/migratekit:main-openvddk` in the migration and cutover
+commands below and **omit the VDDK volume mount**. Mounting another library at
+`/usr/lib64/vmware-vix-disklib` overrides the bundled copy. All other migration
+options and OpenStack credentials are the same.
+
+In addition to the account permissions below, OpenVDDK's network reads require
+`VirtualMachine.Provisioning.GetVmFiles` (Allow virtual machine download) for
+NFC tickets, plus `Datastore.Browse` and `Datastore.FileManagement` for disk
+descriptors. The latter two are already listed below.
+
+To build this variant locally with Docker BuildKit:
+
+```bash
+docker buildx build --platform linux/amd64 --target openvddk --load \
+  -t migratekit:openvddk .
+```
+
+The bundled kit, including its license, notices, SBOM and administrative tool,
+is under `/usr/lib64/vmware-vix-disklib/`. Its `lib64` link points to the kit's
+`lib` directory, matching the library layout expected by nbdkit.
+
+Migratekit uses NBDSSL with NBD as a fallback; OpenVDDK uses only those supported
+transports from Migratekit's transport list. For NBDSSL, the ESXi certificate
+must match the NFC ticket's thumbprint. NBD sends disk data without encryption.
+Local VMDK file access, SAN transport and writing source disks are unsupported
+by OpenVDDK. This image does not enable HotAdd. See the upstream
+[requirements and known differences](https://github.com/openvddk/openvddk/blob/v0.7.4/evalkit/KNOWN-DIFFERENCES.md)
+before choosing the library for a migration.
+
+### Installing VMware VDDK
+
+For the default image, download the VDDK from
+the VMware website. You will need to create a developer account in order to
 download the VDDK as well as accept the EULA.
 
 1. Download [VMware Virtual Disk Development Kit (VDDK) 8.0.2 for Linux](https://developer.broadcom.com/sdks/vmware-virtual-disk-development-kit-vddk/8.0)
