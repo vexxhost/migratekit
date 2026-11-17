@@ -31,6 +31,3 @@ COPY --from=openvddk-download /opt/openvddk/ /usr/lib64/vmware-vix-disklib/
 RUN nbdkit vddk --dump-plugin > /tmp/openvddk-plugin && \
     grep -Fx 'vddk_library_version=8' /tmp/openvddk-plugin && \
     rm /tmp/openvddk-plugin
-
-# Keep the default build compatible with an externally mounted VMware VDDK.
-FROM runtime AS vmware
