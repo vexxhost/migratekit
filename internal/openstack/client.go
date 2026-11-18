@@ -34,6 +34,10 @@ type PortCreateOpts struct {
 }
 
 func NewClientSet(ctx context.Context) (*ClientSet, error) {
+	return newClientSet(ctx, 2*time.Minute)
+}
+
+func newClientSet(ctx context.Context, requestTimeout time.Duration) (*ClientSet, error) {
 	opts, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
 		return nil, err
@@ -47,6 +51,9 @@ func NewClientSet(ctx context.Context) (*ClientSet, error) {
 	ua := gophercloud.UserAgent{}
 	ua.Prepend("migratekit")
 	provider.UserAgent = ua
+	// Bound individual API requests, including response bodies. This does not
+	// impose a deadline on disk copying or asynchronous operation polling.
+	provider.HTTPClient.Timeout = requestTimeout
 
 	config := &tls.Config{
 		MinVersion: tls.VersionTLS12,
