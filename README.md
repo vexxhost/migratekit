@@ -232,3 +232,13 @@ any of the commands that you need to run for development.
 If you need help with using Migratekit, you can either open an issue to get
 help from the community or you can contact [VEXXHOST](https://vexxhost.com/contact-us/)
 for professional support with VMware migration or OpenStack.
+
+### Independent VMware disks
+
+Migratekit requires every migrated disk to participate in VMware snapshots.
+Disks in `independent_persistent` or `independent_nonpersistent` mode are
+excluded from those snapshots. Migratekit refuses these configurations before
+creating migration snapshots or OpenStack resources and identifies the disk
+that needs preparation. Prepare a snapshot-capable copy and verify its
+application data before retrying; Migratekit does not silently omit the disk
+or change its mode.

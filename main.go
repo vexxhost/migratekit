@@ -153,6 +153,10 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
+		if err := vmware.ValidateSnapshotDisks(o.Config.Hardware.Device); err != nil {
+			return err
+		}
+
 		if o.Config.ChangeTrackingEnabled == nil || !*o.Config.ChangeTrackingEnabled {
 			return errors.New("change tracking is not enabled on the virtual machine")
 		}
