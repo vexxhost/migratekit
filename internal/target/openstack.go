@@ -25,6 +25,7 @@ type OpenStack struct {
 	Disk                *types.VirtualDisk
 	ClientSet           *openstack.ClientSet
 	attachmentRequested bool
+	instanceUUID        string
 }
 
 type VolumeCreateOpts struct {
@@ -186,11 +187,12 @@ func (t *OpenStack) Connect(ctx context.Context) error {
 		return err
 	}
 
+	instanceUUID, err := t.currentInstanceUUID(ctx)
+	if err != nil {
+		return err
+	}
+
 	if path == "" {
-		instanceUUID, err := openstack.GetCurrentInstanceUUID(ctx)
-		if err != nil {
-			return err
-		}
 
 		log.WithFields(log.Fields{
 			"instance_uuid": instanceUUID,
@@ -277,6 +279,19 @@ func (t *OpenStack) GetPath(ctx context.Context) (string, error) {
 	return devicePath, nil
 }
 
+// Retain the identity used to attach a volume so cleanup does not depend on a
+// fresh metadata response after a long copy or an interrupted attachment.
+func (t *OpenStack) currentInstanceUUID(ctx context.Context) (string, error) {
+	if t.instanceUUID == "" {
+		id, err := openstack.GetCurrentInstanceUUID(ctx)
+		if err != nil {
+			return "", err
+		}
+		t.instanceUUID = id
+	}
+	return t.instanceUUID, nil
+}
+
 func (t *OpenStack) Disconnect(ctx context.Context) error {
 	volume, err := t.ClientSet.GetVolumeForDisk(ctx, t.VirtualMachine, t.Disk)
 	if errors.Is(err, openstack.ErrorVolumeNotFound) {
@@ -288,7 +303,7 @@ func (t *OpenStack) Disconnect(ctx context.Context) error {
 	if len(volume.Attachments) == 0 && volume.Status == "available" && !t.attachmentRequested {
 		return nil
 	}
-	instanceUUID, err := openstack.GetCurrentInstanceUUID(ctx)
+	instanceUUID, err := t.currentInstanceUUID(ctx)
 	if err != nil {
 		return err
 	}

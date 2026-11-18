@@ -21,11 +21,13 @@ type metadataTransport func(*http.Request) (*http.Response, error)
 func (f metadataTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestDisconnectUsesAttachmentRecords(t *testing.T) {
-	for _, scenario := range []string{"owned", "foreign", "pending", "available", "bad-metadata"} {
+	for _, scenario := range []string{"owned", "foreign", "pending", "available", "bad-metadata", "cached-owned", "cached-foreign", "cached-pending"} {
 		t.Run(scenario, func(t *testing.T) {
 			const volumeID = "12345678-1234-1234-1234-123456789abc"
 			const runnerID = "abcdefab-1234-1234-1234-123456789abc"
 			var deleted atomic.Int32
+			var metadataUnavailable atomic.Bool
+			kind := strings.TrimPrefix(scenario, "cached-")
 			original := http.DefaultTransport
 			http.DefaultTransport = metadataTransport(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Host != "169.254.169.254" {
@@ -33,7 +35,7 @@ func TestDisconnectUsesAttachmentRecords(t *testing.T) {
 				}
 				status := 200
 				body := `{"uuid":"` + runnerID + `"}`
-				if scenario == "bad-metadata" {
+				if scenario == "bad-metadata" || metadataUnavailable.Load() {
 					status = 503
 					body = `{"error":"unavailable"}`
 				}
@@ -48,7 +50,7 @@ func TestDisconnectUsesAttachmentRecords(t *testing.T) {
 				case r.Method == "GET" && r.URL.Path == "/volumes/"+volumeID:
 					status := "in-use"
 					var attachments []any
-					switch scenario {
+					switch kind {
 					case "owned", "bad-metadata":
 						attachments = []any{map[string]string{"server_id": runnerID}}
 					case "foreign":
@@ -64,7 +66,7 @@ func TestDisconnectUsesAttachmentRecords(t *testing.T) {
 					}
 					json.NewEncoder(w).Encode(map[string]any{"volume": map[string]any{"id": volumeID, "status": status, "attachments": attachments}})
 				case r.Method == "GET" && r.URL.Path == "/servers/"+runnerID+"/os-volume_attachments":
-					if scenario != "pending" {
+					if kind != "pending" {
 						t.Errorf("unexpected Nova lookup for %s", scenario)
 					}
 					json.NewEncoder(w).Encode(map[string]any{"volumeAttachments": []any{map[string]string{"volumeId": volumeID, "serverId": runnerID, "id": volumeID}}})
@@ -80,14 +82,20 @@ func TestDisconnectUsesAttachmentRecords(t *testing.T) {
 			vm := object.NewVirtualMachine(nil, types.ManagedObjectReference{Type: "VirtualMachine", Value: "vm-test"})
 			vm.InventoryPath = "/dc/vm/test-guest"
 			service := &gophercloud.ServiceClient{ProviderClient: &gophercloud.ProviderClient{HTTPClient: *api.Client()}, Endpoint: api.URL + "/"}
-			destination := &OpenStack{VirtualMachine: vm, Disk: &types.VirtualDisk{VirtualDevice: types.VirtualDevice{Key: 2000}}, ClientSet: &openstack.ClientSet{BlockStorage: service, Compute: service}, attachmentRequested: scenario == "pending"}
+			destination := &OpenStack{VirtualMachine: vm, Disk: &types.VirtualDisk{VirtualDevice: types.VirtualDevice{Key: 2000}}, ClientSet: &openstack.ClientSet{BlockStorage: service, Compute: service}, attachmentRequested: kind == "pending"}
 			ctx := context.WithValue(context.Background(), "vzUnsafeVolumeByName", false)
+			if strings.HasPrefix(scenario, "cached-") {
+				if id, err := destination.currentInstanceUUID(ctx); err != nil || id != runnerID {
+					t.Fatalf("recording attachment identity: id=%q error=%v", id, err)
+				}
+				metadataUnavailable.Store(true)
+			}
 			err := destination.Disconnect(ctx)
 			if (err != nil) != (scenario == "bad-metadata") {
 				t.Fatalf("unexpected disconnect result: %v", err)
 			}
 			want := int32(0)
-			if scenario == "owned" || scenario == "pending" {
+			if kind == "owned" || kind == "pending" {
 				want = 1
 			}
 			if deleted.Load() != want {
