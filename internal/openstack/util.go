@@ -1,10 +1,13 @@
 package openstack
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gosimple/slug"
 	"github.com/vmware/govmomi/object"
@@ -15,9 +18,9 @@ type OpenStackMetadata struct {
 	UUID string `json:"uuid"`
 }
 
-func GetCurrentInstanceUUID() (string, error) {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", "http://169.254.169.254/openstack/latest/meta_data.json", nil)
+func GetCurrentInstanceUUID(ctx context.Context) (string, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://169.254.169.254/openstack/latest/meta_data.json", nil)
 	if err != nil {
 		return "", err
 	}
@@ -27,6 +30,9 @@ func GetCurrentInstanceUUID() (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("metadata service returned HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -36,6 +42,9 @@ func GetCurrentInstanceUUID() (string, error) {
 	var metadata OpenStackMetadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
 		return "", err
+	}
+	if metadata.UUID == "" {
+		return "", fmt.Errorf("metadata service returned no instance UUID")
 	}
 
 	return metadata.UUID, nil
