@@ -2,10 +2,13 @@ package vmware_nbdkit
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -184,6 +187,8 @@ func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) error {
 		}
 	}()
 
+	fixNicNames, _ := ctx.Value("fixNicNames").(bool)
+
 	for index, server := range s.Servers {
 		t, err := target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
 		if err != nil {
@@ -194,7 +199,7 @@ func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) error {
 			runV2V = false
 		}
 
-		err = server.SyncToTarget(ctx, t, runV2V)
+		err = server.SyncToTarget(ctx, t, runV2V, fixNicNames && index == 0)
 		if err != nil {
 			return err
 		}
@@ -308,10 +313,13 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 	return nil
 }
 
-func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V bool) error {
+func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V bool, fixNicNames bool) error {
 	snapshotChangeId, err := vmware.GetChangeID(s.Disk)
 	if err != nil {
-		return err
+		if !errors.Is(err, vmware.ErrCBTNotEnabled) {
+			return err
+		}
+		snapshotChangeId = &vmware.ChangeID{}
 	}
 
 	needFullCopy, targetIsClean, err := target.NeedsFullCopy(ctx, t)
@@ -387,5 +395,78 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 		}
 	}
 
+	if fixNicNames {
+		if err := s.injectUdevNicRules(ctx, path); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+func (s *NbdkitServer) injectUdevNicRules(ctx context.Context, path string) error {
+	if path == "" {
+		log.Warning("No block device path available, skipping udev NIC rule injection")
+		return nil
+	}
+
+	devices, err := s.Servers.VirtualMachine.Device(ctx)
+	if err != nil {
+		return err
+	}
+
+	nics := devices.SelectByType((*types.VirtualEthernetCard)(nil))
+	if len(nics) == 0 {
+		log.Info("No network adapters found, skipping udev NIC rule injection")
+		return nil
+	}
+
+	var echoLines []string
+	for i, nic := range nics {
+		card := nic.(types.BaseVirtualEthernetCard).GetVirtualEthernetCard()
+		name := nicInterfaceName(nic, i)
+
+		log.WithFields(log.Fields{
+			"mac":  card.MacAddress,
+			"name": name,
+		}).Info("Adding udev NIC rule")
+
+		rule := fmt.Sprintf(
+			`SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="%s", NAME="%s"`,
+			card.MacAddress, name,
+		)
+		echoLines = append(echoLines, fmt.Sprintf("echo '%s'", rule))
+	}
+
+	// Write the rules file inline via --run-command to avoid inode corruption
+	// that --upload can cause on ext4 filesystems.
+	shellCmd := fmt.Sprintf(
+		"{ %s; } > /etc/udev/rules.d/70-persistent-net.rules",
+		strings.Join(echoLines, "; "),
+	)
+
+	os.Setenv("LIBGUESTFS_BACKEND", "direct")
+	cmd := exec.Command("virt-customize", "-a", path, "--run-command", shellCmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	log.WithField("path", path).Info("Injecting udev NIC rules into guest")
+	return cmd.Run()
+}
+
+func nicInterfaceName(nic types.BaseVirtualDevice, index int) string {
+	device := nic.GetVirtualDevice()
+
+	if device.SlotInfo != nil {
+		if pci, ok := device.SlotInfo.(*types.VirtualDevicePciBusSlotInfo); ok && pci.PciSlotNumber > 0 {
+			return fmt.Sprintf("ens%d", pci.PciSlotNumber)
+		}
+	}
+
+	// Fallback: VMXNET3 uses PCI slots 192, 224, 256, ... (192 + 32*index)
+	if _, ok := nic.(*types.VirtualVmxnet3); ok {
+		return fmt.Sprintf("ens%d", 192+32*index)
+	}
+
+	return fmt.Sprintf("eth%d", index)
 }

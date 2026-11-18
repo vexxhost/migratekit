@@ -9,6 +9,7 @@ import (
 )
 
 var ErrInvalidChangeID = errors.New("invalid change ID")
+var ErrCBTNotEnabled = errors.New("CBT is not enabled")
 
 type ChangeID struct {
 	UUID   string
@@ -45,7 +46,7 @@ func GetChangeID(disk *types.VirtualDisk) (*ChangeID, error) {
 	}
 
 	if changeId == "" {
-		return nil, fmt.Errorf("CBT is not enabled on disk %d", disk.Key)
+		return nil, fmt.Errorf("%w on disk %d", ErrCBTNotEnabled, disk.Key)
 	}
 
 	return ParseChangeID(changeId)

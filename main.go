@@ -65,14 +65,18 @@ var (
 	compressionMethod    CompressionMethodOpts = Skipz
 	flavorId             string
 	networkMapping       cmd.NetworkMappingFlag
-	availabilityZone     string
+	availabilityZone        string
+	volumeAvailabilityZone  string
 	volumeType           string
 	securityGroups       []string
 	enablev2v            bool
 	busType              BusTypeOpts
 	vzUnsafeVolumeByName bool
 	osType               string
-    enableQemuGuestAgent bool
+	enableQemuGuestAgent bool
+	noCBT                bool
+	osProject            string
+	fixNicNames          bool
 )
 
 var rootCmd = &cobra.Command{
@@ -154,7 +158,10 @@ var rootCmd = &cobra.Command{
 		}
 
 		if o.Config.ChangeTrackingEnabled == nil || !*o.Config.ChangeTrackingEnabled {
-			return errors.New("change tracking is not enabled on the virtual machine")
+			if !noCBT {
+				return errors.New("change tracking is not enabled on the virtual machine")
+			}
+			log.Warning("Change tracking is not enabled, --no-cbt set: migrations will always do a full copy")
 		}
 
 		if snapshotRef, _ := vm.FindSnapshot(ctx, "migratekit"); snapshotRef != nil {
@@ -186,8 +193,12 @@ var rootCmd = &cobra.Command{
 		})
 
 		log.Info("Setting Disk Bus: ", BusTypeOptsIds[busType][0])
+		volumeAZ := volumeAvailabilityZone
+		if volumeAZ == "" {
+			volumeAZ = availabilityZone
+		}
 		v := target.VolumeCreateOpts{
-			AvailabilityZone: availabilityZone,
+			AvailabilityZone: volumeAZ,
 			VolumeType:       volumeType,
 			BusType:          BusTypeOptsIds[busType][0],
 		}
@@ -198,6 +209,10 @@ var rootCmd = &cobra.Command{
 		ctx = context.WithValue(ctx, "osType", osType)
 
 		ctx = context.WithValue(ctx, "enableQemuGuestAgent", enableQemuGuestAgent)
+
+		ctx = context.WithValue(ctx, "osProject", osProject)
+
+		ctx = context.WithValue(ctx, "fixNicNames", fixNicNames)
 
 		cmd.SetContext(ctx)
 
@@ -342,7 +357,9 @@ func init() {
 
 	rootCmd.PersistentFlags().Var(enumflag.New(&compressionMethod, "compression-method", CompressionMethodOptsIds, enumflag.EnumCaseInsensitive), "compression-method", "Specifies the compression method to use for the disk")
 
-	rootCmd.PersistentFlags().StringVar(&availabilityZone, "availability-zone", "", "Openstack availability zone for blockdevice & server")
+	rootCmd.PersistentFlags().StringVar(&availabilityZone, "availability-zone", "", "OpenStack availability zone for server (and volumes if --volume-availability-zone is not set)")
+
+	rootCmd.PersistentFlags().StringVar(&volumeAvailabilityZone, "volume-availability-zone", "", "OpenStack availability zone for volumes (overrides --availability-zone for volumes)")
 
 	rootCmd.PersistentFlags().StringVar(&volumeType, "volume-type", "", "Openstack volume type")
 
@@ -352,7 +369,11 @@ func init() {
 
     rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
 
-    rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
+	rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
+
+	rootCmd.PersistentFlags().BoolVar(&noCBT, "no-cbt", false, "Disable Changed Block Tracking requirement; migrations always perform a full copy")
+
+	rootCmd.PersistentFlags().StringVar(&osProject, "project", "", "OpenStack project name or ID to migrate into (overrides OS_PROJECT_NAME/OS_PROJECT_ID)")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")
@@ -363,6 +384,8 @@ func init() {
 	cutoverCmd.Flags().StringSliceVar(&securityGroups, "security-groups", nil, "Openstack security groups, comma separated (e.g. '42c5a89e-4034-4f2a-adea-b33adc9614f4,6647122c-2d46-42f1-bb26-f38007730fdc')")
 
 	cutoverCmd.Flags().BoolVar(&enablev2v, "run-v2v", true, "Run virt2v-inplace on destination VM")
+
+	cutoverCmd.Flags().BoolVar(&fixNicNames, "fix-nic-names", false, "Inject udev rules into the guest to preserve VMware interface names (e.g. ens192) in OpenStack")
 
 	cutoverCmd.Flags().StringVar(&availabilityZone, "availability-zone", "", "OpenStack availability zone for blockdevice & server")
 	cutoverCmd.MarkFlagRequired("availability-zone")
