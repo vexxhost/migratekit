@@ -72,7 +72,8 @@ var (
 	busType              BusTypeOpts
 	vzUnsafeVolumeByName bool
 	osType               string
-    enableQemuGuestAgent bool
+	enableQemuGuestAgent bool
+	localTargetPath      string
 )
 
 var rootCmd = &cobra.Command{
@@ -197,9 +198,13 @@ var rootCmd = &cobra.Command{
 
 		ctx = context.WithValue(ctx, "osType", osType)
 
-		ctx = context.WithValue(ctx, "enableQemuGuestAgent", enableQemuGuestAgent)
+			ctx = context.WithValue(ctx, "enableQemuGuestAgent", enableQemuGuestAgent)
 
-		cmd.SetContext(ctx)
+	if localTargetPath != "" {
+		ctx = context.WithValue(ctx, "localTargetPath", localTargetPath)
+	}
+
+	cmd.SetContext(ctx)
 
 		return nil
 	},
@@ -236,90 +241,142 @@ It handles the following additional cases as well:
 var cutoverCmd = &cobra.Command{
 	Use:   "cutover",
 	Short: "Cutover to the new virtual machine",
-	Long: `This commands will cutover into the OpenStack virtual machine from VMware by executing the following steps:
+	Long: `This commands will cutover into the target system from VMware by executing the following steps:
 
+For OpenStack targets:
 - Run a migration cycle
 - Shut down the source virtual machine
 - Run a final migration cycle to capture missing changes & run virt-v2v-in-place
-- Spin up the new OpenStack virtual machine with the migrated disk`,
+- Spin up the new OpenStack virtual machine with the migrated disk
+
+For Local disk targets:
+- Run a migration cycle
+- Shut down the source virtual machine
+- Run a final migration cycle to capture missing changes`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
 		vm := ctx.Value("vm").(*object.VirtualMachine)
 		vddkConfig := ctx.Value("vddkConfig").(*vmware_nbdkit.VddkConfig)
 
-		clients, err := openstack.NewClientSet(ctx)
-		if err != nil {
-			return err
-		}
+		// Check if we're using local disk target
+		isLocalTarget := ctx.Value("localTargetPath") != nil
 
-		log.Info("Ensuring OpenStack resources exist")
+		if !isLocalTarget {
+			// OpenStack target path
+			clients, err := openstack.NewClientSet(ctx)
+			if err != nil {
+				return err
+			}
 
-		flavor, err := flavors.Get(ctx, clients.Compute, flavorId).Extract()
-		if err != nil {
-			return err
-		}
+			log.Info("Ensuring OpenStack resources exist")
 
-		log.WithFields(log.Fields{
-			"flavor": flavor.Name,
-		}).Info("Flavor exists, ensuring network resources exist")
+			flavor, err := flavors.Get(ctx, clients.Compute, flavorId).Extract()
+			if err != nil {
+				return err
+			}
 
-		v := openstack.PortCreateOpts{}
-		if len(securityGroups) > 0 {
-			v.SecurityGroups = &securityGroups
-		}
-		ctx = context.WithValue(ctx, "portCreateOpts", &v)
+			log.WithFields(log.Fields{
+				"flavor": flavor.Name,
+			}).Info("Flavor exists, ensuring network resources exist")
 
-		networks, err := clients.EnsurePortsForVirtualMachine(ctx, vm, &networkMapping)
-		if err != nil {
-			return err
-		}
+			v := openstack.PortCreateOpts{}
+			if len(securityGroups) > 0 {
+				v.SecurityGroups = &securityGroups
+			}
+			ctx = context.WithValue(ctx, "portCreateOpts", &v)
 
-		log.Info("Starting migration cycle")
+			networks, err := clients.EnsurePortsForVirtualMachine(ctx, vm, &networkMapping)
+			if err != nil {
+				return err
+			}
 
-		servers := vmware_nbdkit.NewNbdkitServers(vddkConfig, vm)
-		err = servers.MigrationCycle(ctx, false)
-		if err != nil {
-			return err
-		}
+			log.Info("Starting migration cycle")
 
-		log.Info("Completed migration cycle, shutting down source VM")
+			servers := vmware_nbdkit.NewNbdkitServers(vddkConfig, vm)
+			err = servers.MigrationCycle(ctx, false)
+			if err != nil {
+				return err
+			}
 
-		powerState, err := vm.PowerState(ctx)
-		if err != nil {
-			return err
-		}
+			log.Info("Completed migration cycle, shutting down source VM")
 
-		if powerState == types.VirtualMachinePowerStatePoweredOff {
-			log.Warn("Source VM is already off, skipping shutdown")
+			powerState, err := vm.PowerState(ctx)
+			if err != nil {
+				return err
+			}
+
+			if powerState == types.VirtualMachinePowerStatePoweredOff {
+				log.Warn("Source VM is already off, skipping shutdown")
+			} else {
+				err := vm.ShutdownGuest(ctx)
+				if err != nil {
+					return err
+				}
+
+				err = vm.WaitForPowerState(ctx, types.VirtualMachinePowerStatePoweredOff)
+				if err != nil {
+					return err
+				}
+
+				log.Info("Source VM shut down, starting final migration cycle")
+			}
+
+			servers = vmware_nbdkit.NewNbdkitServers(vddkConfig, vm)
+			err = servers.MigrationCycle(ctx, enablev2v)
+			if err != nil {
+				return err
+			}
+
+			log.Info("Final migration cycle completed, spinning up new OpenStack VM")
+
+			err = clients.CreateResourcesForVirtualMachine(ctx, vm, flavorId, networks, availabilityZone)
+			if err != nil {
+				return err
+			}
+
+			log.Info("Cutover completed")
 		} else {
-			err := vm.ShutdownGuest(ctx)
+			// Local disk target path
+			log.Info("Starting migration cycle for local disk backup")
+
+			servers := vmware_nbdkit.NewNbdkitServers(vddkConfig, vm)
+			err := servers.MigrationCycle(ctx, false)
 			if err != nil {
 				return err
 			}
 
-			err = vm.WaitForPowerState(ctx, types.VirtualMachinePowerStatePoweredOff)
+			log.Info("Completed migration cycle, shutting down source VM")
+
+			powerState, err := vm.PowerState(ctx)
 			if err != nil {
 				return err
 			}
 
-			log.Info("Source VM shut down, starting final migration cycle")
+			if powerState == types.VirtualMachinePowerStatePoweredOff {
+				log.Warn("Source VM is already off, skipping shutdown")
+			} else {
+				err := vm.ShutdownGuest(ctx)
+				if err != nil {
+					return err
+				}
+
+				err = vm.WaitForPowerState(ctx, types.VirtualMachinePowerStatePoweredOff)
+				if err != nil {
+					return err
+				}
+
+				log.Info("Source VM shut down, starting final migration cycle")
+			}
+
+			servers = vmware_nbdkit.NewNbdkitServers(vddkConfig, vm)
+			err = servers.MigrationCycle(ctx, enablev2v)
+			if err != nil {
+				return err
+			}
+
+			log.Info("Final migration cycle completed for local disk backup")
 		}
-
-		servers = vmware_nbdkit.NewNbdkitServers(vddkConfig, vm)
-		err = servers.MigrationCycle(ctx, enablev2v)
-		if err != nil {
-			return err
-		}
-
-		log.Info("Final migration cycle completed, spinning up new OpenStack VM")
-
-		err = clients.CreateResourcesForVirtualMachine(ctx, vm, flavorId, networks, availabilityZone)
-		if err != nil {
-			return err
-		}
-
-		log.Info("Cutover completed")
 
 		return nil
 	},
@@ -350,9 +407,11 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&vzUnsafeVolumeByName, "vz-unsafe-volume-by-name", false, "Only use the name to find a volume - workaround for virtuozzu - dangerous option")
 
-    rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
+    	rootCmd.PersistentFlags().StringVar(&osType, "os-type", "", "Set os_type in the volume (image) metadata, (if set to \"auto\", it tries to detect the type from VMware GuestId)")
 
     rootCmd.PersistentFlags().BoolVar(&enableQemuGuestAgent, "enable-qemu-guest-agent", false, "Sets the hw_qemu_guest_agent metadata parameter to yes")
+
+	rootCmd.PersistentFlags().StringVar(&localTargetPath, "local-target-path", "", "Local directory path for storing VM disks (alternative to OpenStack)")
 
 	cutoverCmd.Flags().StringVar(&flavorId, "flavor", "", "OpenStack Flavor ID")
 	cutoverCmd.MarkFlagRequired("flavor")
