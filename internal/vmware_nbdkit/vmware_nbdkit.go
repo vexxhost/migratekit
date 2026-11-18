@@ -2,10 +2,11 @@ package vmware_nbdkit
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -41,6 +42,28 @@ type NbdkitServer struct {
 	Servers *NbdkitServers
 	Disk    *types.VirtualDisk
 	Nbdkit  *nbdkit.NbdkitServer
+}
+
+type migrationTarget struct {
+	Server        *NbdkitServer
+	Target        target.Target
+	Path          string
+	NeedFullCopy  bool
+	TargetIsClean bool
+}
+
+func (mt *migrationTarget) connect(ctx context.Context) error {
+	var err error
+	// Capture freshness before Connect can create the destination volume.
+	mt.NeedFullCopy, mt.TargetIsClean, err = target.NeedsFullCopy(ctx, mt.Target)
+	if err != nil {
+		return err
+	}
+	if err := mt.Target.Connect(ctx); err != nil {
+		return err
+	}
+	mt.Path, err = mt.Target.GetPath(ctx)
+	return err
 }
 
 func NewNbdkitServers(vddk *VddkConfig, vm *object.VirtualMachine) *NbdkitServers {
@@ -184,23 +207,99 @@ func (s *NbdkitServers) MigrationCycle(ctx context.Context, runV2V bool) error {
 		}
 	}()
 
-	for index, server := range s.Servers {
+	if runV2V {
+		return s.migrationCycleWithV2V(ctx)
+	}
+
+	for _, server := range s.Servers {
 		t, err := target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
 		if err != nil {
 			return err
 		}
 
-		if index != 0 {
-			runV2V = false
-		}
-
-		err = server.SyncToTarget(ctx, t, runV2V)
+		err = server.SyncToTarget(ctx, t)
 		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func disconnectMigrationTargets(ctx context.Context, targets []*migrationTarget) error {
+	var errs []error
+
+	for _, mt := range targets {
+		if mt.Target == nil {
+			continue
+		}
+
+		if err := mt.Target.Disconnect(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (s *NbdkitServers) migrationCycleWithV2V(ctx context.Context) (err error) {
+	targets := []*migrationTarget{}
+	var targetsMu sync.Mutex
+	defer func() {
+		err = errors.Join(err, disconnectMigrationTargets(ctx, targets))
+	}()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(c)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-c:
+		}
+		log.Warn("Received interrupt signal, cleaning up...")
+
+		targetsMu.Lock()
+		interruptedTargets := append([]*migrationTarget(nil), targets...)
+		targetsMu.Unlock()
+		err := disconnectMigrationTargets(ctx, interruptedTargets)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to disconnect from targets")
+		}
+
+		os.Exit(1)
+	}()
+
+	for _, server := range s.Servers {
+		t, err := target.NewOpenStack(ctx, s.VirtualMachine, server.Disk)
+		if err != nil {
+			return err
+		}
+
+		mt := &migrationTarget{
+			Server: server,
+			Target: t,
+		}
+		targetsMu.Lock()
+		targets = append(targets, mt)
+		targetsMu.Unlock()
+
+		if err := mt.connect(ctx); err != nil {
+			return err
+		}
+	}
+
+	for _, mt := range targets {
+		_, err := mt.Server.CopyToTarget(ctx, mt.Target, mt.Path, mt.NeedFullCopy, mt.TargetIsClean)
+		if err != nil {
+			return err
+		}
+	}
+
+	return s.RunVirtV2VInPlace(ctx, targets)
 }
 
 func (s *NbdkitServer) FullCopyToTarget(t target.Target, path string, targetIsClean bool) error {
@@ -308,18 +407,30 @@ func (s *NbdkitServer) IncrementalCopyToTarget(ctx context.Context, t target.Tar
 	return nil
 }
 
-func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V bool) error {
+func (s *NbdkitServer) CopyToTarget(ctx context.Context, t target.Target, path string, needFullCopy, targetIsClean bool) (*vmware.ChangeID, error) {
 	snapshotChangeId, err := vmware.GetChangeID(s.Disk)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	needFullCopy, targetIsClean, err := target.NeedsFullCopy(ctx, t)
-	if err != nil {
-		return err
+	if needFullCopy {
+		err = s.FullCopyToTarget(t, path, targetIsClean)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		err = s.IncrementalCopyToTarget(ctx, t, path)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	err = t.Connect(ctx)
+	return snapshotChangeId, nil
+}
+
+func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target) error {
+	mt := &migrationTarget{Server: s, Target: t}
+	err := mt.connect(ctx)
 	if err != nil {
 		return err
 	}
@@ -339,52 +450,14 @@ func (s *NbdkitServer) SyncToTarget(ctx context.Context, t target.Target, runV2V
 		os.Exit(1)
 	}()
 
-	path, err := t.GetPath(ctx)
+	snapshotChangeId, err := s.CopyToTarget(ctx, t, mt.Path, mt.NeedFullCopy, mt.TargetIsClean)
 	if err != nil {
 		return err
 	}
 
-	if needFullCopy {
-		err = s.FullCopyToTarget(t, path, targetIsClean)
-		if err != nil {
-			return err
-		}
-	} else {
-		err = s.IncrementalCopyToTarget(ctx, t, path)
-		if err != nil {
-			return err
-		}
-	}
-
-	if runV2V {
-		log.Info("Running virt-v2v-in-place")
-
-		os.Setenv("LIBGUESTFS_BACKEND", "direct")
-
-		var cmd *exec.Cmd
-		if s.Servers.VddkConfig.Debug {
-			cmd = exec.Command("virt-v2v-in-place", "-v", "-x", "-i", "disk", path)
-		} else {
-			cmd = exec.Command("virt-v2v-in-place", "-i", "disk", path)
-		}
-
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		err := cmd.Run()
-		if err != nil {
-			return err
-		}
-
-		err = t.WriteChangeID(ctx, &vmware.ChangeID{})
-		if err != nil {
-			return err
-		}
-	} else {
-		err = t.WriteChangeID(ctx, snapshotChangeId)
-		if err != nil {
-			return err
-		}
+	err = t.WriteChangeID(ctx, snapshotChangeId)
+	if err != nil {
+		return err
 	}
 
 	return nil
