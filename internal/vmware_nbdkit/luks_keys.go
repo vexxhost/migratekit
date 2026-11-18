@@ -17,6 +17,10 @@ func LUKSKeyFileArgs(values []string) ([]string, error) {
 		if !ok || filename == "" || selector == "" {
 			return nil, errors.New("--luks-key-file requires SELECTOR=PATH")
 		}
+		// virt-v2v parses --key as colon-delimited fields without escaping.
+		if strings.Contains(filename, ":") {
+			return nil, errors.New("--luks-key-file path cannot contain a colon")
+		}
 		keyUUID, uuidErr := uuid.Parse(selector)
 		device := strings.HasPrefix(selector, "/dev/") && len(selector) > len("/dev/") && !strings.ContainsAny(selector, ":\x00")
 		if selector != "all" && uuidErr != nil && !device {

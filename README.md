@@ -273,6 +273,7 @@ Mount the file read-only when using Docker. Repeat `--luks-key-file` for multipl
 keys. The selector before `=` can be `all`, a LUKS UUID, or a libguestfs device
 path such as `/dev/sda2`. Prefer a UUID when disk ordering can change. Invalid
 selectors and unreadable files fail before authentication or source shutdown.
+File paths cannot contain colons because virt-v2v uses colons to separate fields.
 
 Migratekit forwards file references to [virt-v2v's `--key` option](https://www.libguestfs.org/virt-v2v.1.html),
 keeping passphrase values out of its command arguments. The destination remains

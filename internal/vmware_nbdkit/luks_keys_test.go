@@ -34,7 +34,11 @@ func TestLUKSKeyFilesRemainFileReferences(t *testing.T) {
 
 func TestLUKSKeyFileValidation(t *testing.T) {
 	dir := t.TempDir()
-	for _, value := range []string{"", "all", "all=", "=" + dir, "inline:key:value=" + dir, "all=" + dir, "all=" + filepath.Join(dir, "missing")} {
+	colonFile := filepath.Join(dir, "unlock:key")
+	if err := os.WriteFile(colonFile, []byte("example-passphrase"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"", "all", "all=", "=" + dir, "inline:key:value=" + dir, "all=" + dir, "all=" + filepath.Join(dir, "missing"), "all=" + colonFile} {
 		t.Run(value, func(t *testing.T) {
 			if _, err := LUKSKeyFileArgs([]string{value}); err == nil {
 				t.Fatal("invalid key specification was accepted")
