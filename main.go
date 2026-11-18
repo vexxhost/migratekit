@@ -80,6 +80,7 @@ var (
 	osType               string
 	enableQemuGuestAgent bool
 	guestNetworkConfigs  []string
+	luksKeyFiles         []string
 )
 
 var rootCmd = &cobra.Command{
@@ -87,6 +88,10 @@ var rootCmd = &cobra.Command{
 	Short: "Near-live migration toolkit for VMware to OpenStack",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Validate before authentication, replication or shutting down the source.
+		keyArgs, keyErr := validateLUKSKeyOptions(luksKeyFiles, enablev2v, cmd.Name())
+		if keyErr != nil {
+			return keyErr
+		}
 		if err := validateGuestNetworkOptions(guestNetworkConfigs, enablev2v); err != nil {
 			return err
 		}
@@ -210,6 +215,7 @@ var rootCmd = &cobra.Command{
 
 		ctx = context.WithValue(ctx, "enableQemuGuestAgent", enableQemuGuestAgent)
 		ctx = context.WithValue(ctx, "guestNetworkConfigs", guestNetworkConfigs)
+		ctx = context.WithValue(ctx, "luksKeys", keyArgs)
 
 		cmd.SetContext(ctx)
 
@@ -340,6 +346,7 @@ var cutoverCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging")
 	rootCmd.PersistentFlags().StringArrayVar(&guestNetworkConfigs, "guest-network-config", nil, "Windows guest static IP configuration forwarded to virt-v2v --mac (MAC:ip:ADDRESS,GATEWAY,PREFIX[,DNS...]); repeat for multiple NICs")
+	rootCmd.PersistentFlags().StringArrayVar(&luksKeyFiles, "luks-key-file", nil, "LUKS unlock key file for conversion (SELECTOR=PATH, where SELECTOR is all, a LUKS UUID, or a libguestfs device path); repeat for multiple keys")
 
 	rootCmd.PersistentFlags().StringVar(&endpoint, "vmware-endpoint", "", "VMware endpoint (hostname or IP only)")
 	rootCmd.MarkPersistentFlagRequired("vmware-endpoint")
@@ -390,6 +397,13 @@ func main() {
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
+}
+
+func validateLUKSKeyOptions(values []string, runV2V bool, command string) ([]string, error) {
+	if len(values) > 0 && (command != "cutover" || !runV2V) {
+		return nil, errors.New("--luks-key-file requires cutover with --run-v2v=true")
+	}
+	return vmware_nbdkit.LUKSKeyFileArgs(values)
 }
 
 func validateGuestNetworkOptions(configs []string, runV2V bool) error {

@@ -258,3 +258,25 @@ any of the commands that you need to run for development.
 If you need help with using Migratekit, you can either open an issue to get
 help from the community or you can contact [VEXXHOST](https://vexxhost.com/contact-us/)
 for professional support with VMware migration or OpenStack.
+
+### LUKS keys during conversion
+
+Replication copies encrypted disks as ciphertext. When converting a LUKS guest
+with `cutover --run-v2v=true`, provide an unlock passphrase through a regular
+file readable inside the container:
+
+```console
+migratekit ... cutover --luks-key-file all=/run/secrets/luks-root ...
+```
+
+Mount the file read-only when using Docker. Repeat `--luks-key-file` for multiple
+keys. The selector before `=` can be `all`, a LUKS UUID, or a libguestfs device
+path such as `/dev/sda2`. Prefer a UUID when disk ordering can change. Invalid
+selectors and unreadable files fail before authentication or source shutdown.
+
+Migratekit forwards file references to [virt-v2v's `--key` option](https://www.libguestfs.org/virt-v2v.1.html),
+keeping passphrase values out of its command arguments. The destination remains
+encrypted and still needs its normal boot-time unlock method. This option is
+for conversion; it does not transfer TPM state or configure automatic unlock.
+Passphrase validity is checked during final conversion, after source shutdown.
+If a key is rejected, keep the source off, correct the key file, and retry.
