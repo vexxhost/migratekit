@@ -169,6 +169,50 @@ with the network once it has been migrated to the OpenStack cloud.
 
 You can use more than one network mapping in case your VMWare machine has more than one.
 
+### Windows NIC teams
+
+Converting VMware adapters to VirtIO can change their Windows interface
+identities even when their MAC addresses are preserved. Existing Windows LBFO
+teams can retain references to the old adapters and remain down. Mapping the
+individual VMware NICs to OpenStack ports does not rebuild an LBFO team or
+configure the team's addresses inside Windows.
+
+Before cutover, record the team members and their physical MAC addresses,
+teaming mode, load-balancing algorithm, active/standby policy, VLAN settings,
+addresses, DNS servers and routes. Keep console access or a separate management
+interface available for destination configuration. Useful inventory commands
+include:
+
+```powershell
+Get-NetLbfoTeam
+Get-NetLbfoTeamMember
+Get-NetLbfoTeamNic
+Get-NetAdapter -Physical
+Get-NetIPConfiguration
+Get-DnsClientServerAddress
+Get-NetRoute
+```
+
+Map each physical source NIC to its intended destination port. Reserve any
+team IP addresses against conflicting allocation, and configure the allowed
+address pairs needed for the team's effective MAC and IP on every port that
+may carry its traffic. Check the destination's support for guest teaming and
+MAC changes, along with security groups and the selected teaming mode.
+
+After cutover, keep the source powered off. Through the destination console,
+identify the new physical adapters by MAC, remove stale team membership if
+needed, recreate the team, and restore its recorded policy and IP/DNS/routes.
+Review the exact adapter selection before changing it to preserve management
+access. Migratekit does not automate these guest-specific changes.
+
+Validate application traffic from another machine, reboot persistence, and
+failure and recovery of each member in both directions. A team reporting `Up`
+while both links are available does not establish working failover. If the
+standby reports an external-connectivity failure or traffic stops when the
+active link fails, investigate the guest driver and destination network before
+accepting the team. Do not treat a successful disk conversion as qualification
+of the destination's teaming behavior.
+
 There are a few optional flags to define the following:
 -  `--security-groups`: A comma separated list of security group UUIDs to apply
                        to the virtual machines port, if not supplied only the
