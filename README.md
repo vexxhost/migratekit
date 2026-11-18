@@ -229,6 +229,17 @@ any of the commands that you need to run for development.
 
 ## Support
 
+### OpenStack API request timeouts
+
+Each OpenStack HTTP request, including reading its response body, has a
+two-minute timeout. A stalled API request returns an error so migration
+cleanup can run. Disk copying and asynchronous operation polling do not share
+this request deadline. Set `MIGRATEKIT_OPENSTACK_REQUEST_TIMEOUT` to a positive
+Go duration, for example `10m`, when individual API requests need more time.
+Pass this variable into the Docker container explicitly with `-e`.
+A timed-out resource-creation request may still have
+been accepted by the cloud; inspect resource state before retrying.
+
 If you need help with using Migratekit, you can either open an issue to get
 help from the community or you can contact [VEXXHOST](https://vexxhost.com/contact-us/)
 for professional support with VMware migration or OpenStack.
