@@ -34,10 +34,14 @@ type PortCreateOpts struct {
 }
 
 func NewClientSet(ctx context.Context) (*ClientSet, error) {
-	return newClientSet(ctx, 2*time.Minute)
-}
-
-func newClientSet(ctx context.Context, requestTimeout time.Duration) (*ClientSet, error) {
+	requestTimeout := 2 * time.Minute
+	if value := os.Getenv("MIGRATEKIT_OPENSTACK_REQUEST_TIMEOUT"); value != "" {
+		var err error
+		requestTimeout, err = time.ParseDuration(value)
+		if err != nil || requestTimeout <= 0 {
+			return nil, errors.New("MIGRATEKIT_OPENSTACK_REQUEST_TIMEOUT must be a positive duration such as 2m")
+		}
+	}
 	opts, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
 		return nil, err

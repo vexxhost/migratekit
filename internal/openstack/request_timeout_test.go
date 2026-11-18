@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,9 +39,10 @@ func TestCloudRequestTimeout(t *testing.T) {
 			t.Setenv("OS_PROJECT_ID", "test-project")
 			t.Setenv("OS_USER_DOMAIN_NAME", "Default")
 			t.Setenv("OS_TOKEN", "")
+			t.Setenv("MIGRATEKIT_OPENSTACK_REQUEST_TIMEOUT", "50ms")
 			result := make(chan error, 1)
 			go func() {
-				_, err := newClientSet(context.Background(), 50*time.Millisecond)
+				_, err := NewClientSet(context.Background())
 				result <- err
 			}()
 			select {
@@ -51,6 +53,18 @@ func TestCloudRequestTimeout(t *testing.T) {
 				}
 			case <-time.After(2 * time.Second):
 				t.Fatal("cloud request did not return after its timeout")
+			}
+		})
+	}
+}
+
+func TestInvalidCloudRequestTimeout(t *testing.T) {
+	for _, value := range []string{"0", "-1s", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("MIGRATEKIT_OPENSTACK_REQUEST_TIMEOUT", value)
+			_, err := NewClientSet(context.Background())
+			if err == nil || !strings.Contains(err.Error(), "MIGRATEKIT_OPENSTACK_REQUEST_TIMEOUT") {
+				t.Fatalf("expected timeout validation before authentication, got %v", err)
 			}
 		})
 	}
